@@ -1,0 +1,219 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import yaml
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
+from orion.data_models import RegionOfInterestBox
+from orion.input_output import read_marker_names
+
+
+class InputPathConfiguration(BaseModel):
+    readouts: Path
+    markers: Path
+    histology: Path | None = None
+    existing_segmentation: Path | None = None
+    existing_quantifications: Path | None = None
+
+
+class ChannelConfiguration(BaseModel):
+    nuclear_marker: str
+    autofluorescence_marker: str
+    technical_markers: list[str] = Field(default_factory=list)
+
+
+class RegionOfInterestConfiguration(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    patch_width_pixels: int
+    patch_height_pixels: int
+    stride_pixels: int
+    minimum_cells: int
+    top_candidate_count_for_raw_quality_control: int
+    manual_override: RegionOfInterestBox | None = None
+
+
+class AutofluorescenceSubtractionConfiguration(BaseModel):
+    enabled: bool = True
+    sample_pixels: int = 100_000
+    clip_upper_quantile: float = 0.95
+
+
+class PercentileClipConfiguration(BaseModel):
+    lower_quantile: float = 0.005
+    upper_quantile: float = 0.995
+
+
+class PreprocessingConfiguration(BaseModel):
+    autofluorescence_subtraction: AutofluorescenceSubtractionConfiguration
+    percentile_clip: PercentileClipConfiguration
+
+
+class SegmentationConfiguration(BaseModel):
+    gaussian_sigma: float = 1.2
+    minimum_nucleus_area_pixels: int = 60
+    maximum_nucleus_area_pixels: int = 1500
+    peak_minimum_distance_pixels: int = 6
+    cell_expansion_distance_pixels: int = 6
+
+
+class NormalizationConfiguration(BaseModel):
+    arcsinh_cofactor: float = 150.0
+    threshold_method: str = "otsu_with_fallback"
+    positive_fraction_minimum: float = 0.005
+    positive_fraction_maximum: float = 0.70
+    fallback_quantile: float = 0.90
+
+
+class SpatialAnalysisConfiguration(BaseModel):
+    nearest_neighbor_count: int = 10
+    minimum_cells_per_type_for_pairwise_analysis: int = 25
+    minimum_cells_per_type_for_clustering: int = 50
+    permutation_count: int = 100
+    neighborhood_cluster_count: int = 6
+
+
+class CellTypeAnnotationRuleConfiguration(BaseModel):
+    name: str
+    positive_markers: list[str] = Field(min_length=1)
+
+
+class AnnotationConfiguration(BaseModel):
+    cell_types: list[CellTypeAnnotationRuleConfiguration] = Field(min_length=1)
+
+
+class ApplicationConfiguration(BaseModel):
+    sample_identifier: str
+    input_paths: InputPathConfiguration
+    output_directory: Path
+    channels: ChannelConfiguration
+    region_of_interest: RegionOfInterestConfiguration
+    preprocessing: PreprocessingConfiguration
+    segmentation: SegmentationConfiguration
+    normalization: NormalizationConfiguration
+    spatial_analysis: SpatialAnalysisConfiguration
+    annotation: AnnotationConfiguration
+
+    @model_validator(mode="after")
+    def validate_configuration_paths(self) -> "ApplicationConfiguration":
+        required_paths = [self.input_paths.readouts, self.input_paths.markers]
+        for required_path in required_paths:
+            if not required_path.exists():
+                raise ValueError(f"Required path does not exist: {required_path}")
+        optional_paths = [
+            self.input_paths.histology,
+            self.input_paths.existing_segmentation,
+            self.input_paths.existing_quantifications,
+        ]
+        for optional_path in optional_paths:
+            if optional_path is not None and not optional_path.exists():
+                raise ValueError(f"Optional path does not exist: {optional_path}")
+        return self
+
+    def validate_marker_names(
+        self, marker_names: list[str]
+    ) -> "ApplicationConfiguration":
+        allowed_marker_names = set(marker_names)
+        for required_marker_name in [
+            self.channels.nuclear_marker,
+            self.channels.autofluorescence_marker,
+        ]:
+            if required_marker_name not in allowed_marker_names:
+                raise ValueError(
+                    f"Unknown marker referenced in configuration: {required_marker_name}"
+                )
+        unknown_technical_markers = (
+            set(self.channels.technical_markers) - allowed_marker_names
+        )
+        if unknown_technical_markers:
+            formatted_unknown_markers = ", ".join(sorted(unknown_technical_markers))
+            raise ValueError(
+                "Unknown technical markers in configuration: "
+                f"{formatted_unknown_markers}"
+            )
+        cell_type_names = [
+            cell_type_rule.name for cell_type_rule in self.annotation.cell_types
+        ]
+        if len(cell_type_names) != len(set(cell_type_names)):
+            raise ValueError(
+                "Duplicate cell type names are not allowed in annotation configuration."
+            )
+        technical_marker_names = set(self.channels.technical_markers)
+        for cell_type_rule in self.annotation.cell_types:
+            if not cell_type_rule.positive_markers:
+                raise ValueError(
+                    f"Cell type '{cell_type_rule.name}' must define at least one positive marker."
+                )
+            for positive_marker_name in cell_type_rule.positive_markers:
+                if positive_marker_name not in allowed_marker_names:
+                    raise ValueError(
+                        "Configured annotation marker "
+                        f"'{positive_marker_name}' is not present in the panel markers file."
+                    )
+                if positive_marker_name in technical_marker_names:
+                    raise ValueError(
+                        "Configured annotation marker "
+                        f"'{positive_marker_name}' cannot be a technical marker."
+                    )
+        return self
+
+    @property
+    def biological_marker_names(self) -> list[str]:
+        technical_markers = set(self.channels.technical_markers)
+        return [
+            marker_name
+            for marker_name in self.marker_names
+            if marker_name not in technical_markers
+        ]
+
+    @property
+    def marker_names(self) -> list[str]:
+        return read_marker_names(self.input_paths.markers)
+
+    @property
+    def sample_output_directory(self) -> Path:
+        return self.output_directory / self.sample_identifier
+
+    @property
+    def annotation_marker_names(self) -> list[str]:
+        seen_marker_names: set[str] = set()
+        ordered_marker_names: list[str] = []
+        for cell_type_rule in self.annotation.cell_types:
+            for marker_name in cell_type_rule.positive_markers:
+                if marker_name not in seen_marker_names:
+                    ordered_marker_names.append(marker_name)
+                    seen_marker_names.add(marker_name)
+        return ordered_marker_names
+
+
+def convert_model_to_dictionary(
+    model: BaseModel | dict[str, Any] | list[Any] | Any,
+) -> Any:
+    if isinstance(model, BaseModel):
+        return {
+            key: convert_model_to_dictionary(value)
+            for key, value in model.model_dump().items()
+        }
+    if isinstance(model, Path):
+        return str(model)
+    if isinstance(model, RegionOfInterestBox):
+        return model.as_dictionary()
+    if isinstance(model, dict):
+        return {key: convert_model_to_dictionary(value) for key, value in model.items()}
+    if isinstance(model, list):
+        return [convert_model_to_dictionary(value) for value in model]
+    return model
+
+
+def load_configuration(path: str | Path) -> ApplicationConfiguration:
+    configuration_path = Path(path)
+    with configuration_path.open("r", encoding="utf-8") as file_handle:
+        configuration_payload = yaml.safe_load(file_handle)
+    try:
+        configuration = ApplicationConfiguration.model_validate(configuration_payload)
+    except ValidationError as validation_error:
+        raise ValueError(str(validation_error)) from validation_error
+    marker_names = read_marker_names(configuration.input_paths.markers)
+    return configuration.validate_marker_names(marker_names)

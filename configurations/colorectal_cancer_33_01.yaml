@@ -1,0 +1,71 @@
+sample_identifier: CRC33_01
+input_paths:
+  readouts: data/CRC33_01/readouts.tiff
+  markers: data/CRC33_01/markers.csv
+  histology: data/CRC33_01/histology.tif
+  existing_segmentation: data/CRC33_01/segmentation.tif
+  existing_quantifications: data/CRC33_01/quantifications.csv
+output_directory: outputs
+
+channels:
+  nuclear_marker: Hoechst
+  autofluorescence_marker: AF1
+  technical_markers:
+    - Hoechst
+    - AF1
+    - Argo550
+
+region_of_interest:
+  patch_width_pixels: 2048
+  patch_height_pixels: 2048
+  stride_pixels: 1024
+  minimum_cells: 3000
+  top_candidate_count_for_raw_quality_control: 20
+  manual_override: null
+
+preprocessing:
+  autofluorescence_subtraction:
+    enabled: true
+    sample_pixels: 100000
+    clip_upper_quantile: 0.95
+  percentile_clip:
+    lower_quantile: 0.005
+    upper_quantile: 0.995
+
+segmentation:
+  gaussian_sigma: 1.2
+  minimum_nucleus_area_pixels: 60
+  maximum_nucleus_area_pixels: 1500
+  peak_minimum_distance_pixels: 6
+  cell_expansion_distance_pixels: 6
+
+normalization:
+  arcsinh_cofactor: 150.0
+  threshold_method: otsu_with_fallback
+  positive_fraction_minimum: 0.005
+  positive_fraction_maximum: 0.70
+  fallback_quantile: 0.90
+
+annotation:
+  cell_types:
+    - name: Tumor
+      positive_markers: [Pan-CK]
+    - name: Endothelial
+      positive_markers: [CD31]
+    - name: Stromal
+      positive_markers: [SMA]
+    - name: B_cell
+      positive_markers: [CD20]
+    - name: T_cell
+      positive_markers: [CD3e]
+    - name: Macrophage
+      positive_markers: [CD68]
+    - name: Treg
+      positive_markers: [CD4, FOXP3]
+
+spatial_analysis:
+  nearest_neighbor_count: 10
+  minimum_cells_per_type_for_pairwise_analysis: 25
+  minimum_cells_per_type_for_clustering: 50
+  permutation_count: 100
+  neighborhood_cluster_count: 6
