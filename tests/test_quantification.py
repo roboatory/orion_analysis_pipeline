@@ -1,7 +1,7 @@
 import numpy as np
 
-from orion.data_models import RegionOfInterestBox
-from orion.quantification import quantify_cells_in_region_of_interest
+from src.data_models import RegionOfInterestBox
+from src.quantification import quantify_cells_in_region_of_interest
 
 
 def test_quantification_schema_and_values() -> None:

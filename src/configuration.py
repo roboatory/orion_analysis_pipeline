@@ -6,22 +6,20 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from orion.data_models import RegionOfInterestBox
-from orion.input_output import read_marker_names
+from src.data_models import RegionOfInterestBox
+from src.io import read_marker_names
 
 
 class InputPathConfiguration(BaseModel):
     readouts: Path
     markers: Path
     histology: Path | None = None
-    existing_segmentation: Path | None = None
-    existing_quantifications: Path | None = None
 
 
 class ChannelConfiguration(BaseModel):
     nuclear_marker: str
+    cytoplasmic_marker: str
     autofluorescence_marker: str
-    technical_markers: list[str] = Field(default_factory=list)
 
 
 class RegionOfInterestConfiguration(BaseModel):
@@ -29,10 +27,10 @@ class RegionOfInterestConfiguration(BaseModel):
 
     patch_width_pixels: int
     patch_height_pixels: int
-    stride_pixels: int
-    minimum_cells: int
-    top_candidate_count_for_raw_quality_control: int
-    manual_override: RegionOfInterestBox | None = None
+    candidate_patch_count: int = Field(default=12, ge=1)
+    minimum_tissue_fraction: float = Field(default=0.35, ge=0.0, le=1.0)
+    minimum_informative_channel_fraction: float = Field(default=0.5, ge=0.0, le=1.0)
+    minimum_channel_signal_spread: float = Field(default=0.05, ge=0.0, le=1.0)
 
 
 class AutofluorescenceSubtractionConfiguration(BaseModel):
@@ -102,11 +100,7 @@ class ApplicationConfiguration(BaseModel):
         for required_path in required_paths:
             if not required_path.exists():
                 raise ValueError(f"Required path does not exist: {required_path}")
-        optional_paths = [
-            self.input_paths.histology,
-            self.input_paths.existing_segmentation,
-            self.input_paths.existing_quantifications,
-        ]
+        optional_paths = [self.input_paths.histology]
         for optional_path in optional_paths:
             if optional_path is not None and not optional_path.exists():
                 raise ValueError(f"Optional path does not exist: {optional_path}")
@@ -118,20 +112,24 @@ class ApplicationConfiguration(BaseModel):
         allowed_marker_names = set(marker_names)
         for required_marker_name in [
             self.channels.nuclear_marker,
+            self.channels.cytoplasmic_marker,
             self.channels.autofluorescence_marker,
         ]:
             if required_marker_name not in allowed_marker_names:
                 raise ValueError(
                     f"Unknown marker referenced in configuration: {required_marker_name}"
                 )
-        unknown_technical_markers = (
-            set(self.channels.technical_markers) - allowed_marker_names
-        )
-        if unknown_technical_markers:
-            formatted_unknown_markers = ", ".join(sorted(unknown_technical_markers))
+        segmentation_marker_names = {
+            self.channels.nuclear_marker,
+            self.channels.cytoplasmic_marker,
+        }
+        if len(segmentation_marker_names) != 2:
             raise ValueError(
-                "Unknown technical markers in configuration: "
-                f"{formatted_unknown_markers}"
+                "Nuclear and cytoplasmic markers must be different channels."
+            )
+        if self.channels.autofluorescence_marker in segmentation_marker_names:
+            raise ValueError(
+                "Autofluorescence marker must be different from segmentation markers."
             )
         cell_type_names = [
             cell_type_rule.name for cell_type_rule in self.annotation.cell_types
@@ -140,7 +138,6 @@ class ApplicationConfiguration(BaseModel):
             raise ValueError(
                 "Duplicate cell type names are not allowed in annotation configuration."
             )
-        technical_marker_names = set(self.channels.technical_markers)
         for cell_type_rule in self.annotation.cell_types:
             if not cell_type_rule.positive_markers:
                 raise ValueError(
@@ -152,20 +149,19 @@ class ApplicationConfiguration(BaseModel):
                         "Configured annotation marker "
                         f"'{positive_marker_name}' is not present in the panel markers file."
                     )
-                if positive_marker_name in technical_marker_names:
+                if positive_marker_name == self.channels.autofluorescence_marker:
                     raise ValueError(
                         "Configured annotation marker "
-                        f"'{positive_marker_name}' cannot be a technical marker."
+                        f"'{positive_marker_name}' cannot be the autofluorescence marker."
                     )
         return self
 
     @property
     def biological_marker_names(self) -> list[str]:
-        technical_markers = set(self.channels.technical_markers)
         return [
             marker_name
             for marker_name in self.marker_names
-            if marker_name not in technical_markers
+            if marker_name != self.channels.autofluorescence_marker
         ]
 
     @property

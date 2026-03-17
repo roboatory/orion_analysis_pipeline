@@ -3,25 +3,20 @@ input_paths:
   readouts: data/CRC33_01/readouts.tiff
   markers: data/CRC33_01/markers.csv
   histology: data/CRC33_01/histology.tif
-  existing_segmentation: data/CRC33_01/segmentation.tif
-  existing_quantifications: data/CRC33_01/quantifications.csv
 output_directory: outputs
 
 channels:
   nuclear_marker: Hoechst
+  cytoplasmic_marker: Pan-CK
   autofluorescence_marker: AF1
-  technical_markers:
-    - Hoechst
-    - AF1
-    - Argo550
 
 region_of_interest:
   patch_width_pixels: 2048
   patch_height_pixels: 2048
-  stride_pixels: 1024
-  minimum_cells: 3000
-  top_candidate_count_for_raw_quality_control: 20
-  manual_override: null
+  candidate_patch_count: 12
+  minimum_tissue_fraction: 0.35
+  minimum_informative_channel_fraction: 0.5
+  minimum_channel_signal_spread: 0.05
 
 preprocessing:
   autofluorescence_subtraction:

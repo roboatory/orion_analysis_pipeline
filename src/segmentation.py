@@ -6,8 +6,8 @@ import numpy as np
 from scipy import ndimage as scipy_ndimage
 from skimage import feature, filters, measure, morphology, segmentation
 
-from orion.configuration import ApplicationConfiguration
-from orion.data_models import SegmentationValidationSummary
+from src.configuration import ApplicationConfiguration
+from src.data_models import SegmentationValidationSummary
 
 
 @dataclass(frozen=True)
@@ -20,13 +20,19 @@ class SegmentationResult:
     chosen_peak_minimum_distance_pixels: int
 
 
-def segment_cells_from_nuclear_image(
+def segment_cells_from_marker_images(
     nuclear_image: np.ndarray,
+    cytoplasmic_image: np.ndarray,
     configuration: ApplicationConfiguration,
     target_cell_count: int | None = None,
 ) -> SegmentationResult:
     normalized_nuclear_image = percentile_normalize_image(
         nuclear_image,
+        configuration.preprocessing.percentile_clip.lower_quantile,
+        configuration.preprocessing.percentile_clip.upper_quantile,
+    )
+    normalized_cytoplasmic_image = percentile_normalize_image(
+        cytoplasmic_image,
         configuration.preprocessing.percentile_clip.lower_quantile,
         configuration.preprocessing.percentile_clip.upper_quantile,
     )
@@ -56,6 +62,7 @@ def segment_cells_from_nuclear_image(
     segmentation_candidates = [
         _segment_binary_mask_with_peak_distance(
             labeled_nuclear_mask=labeled_nuclear_mask,
+            normalized_cytoplasmic_image=normalized_cytoplasmic_image,
             configuration=configuration,
             peak_minimum_distance_pixels=peak_minimum_distance_pixels,
         )
@@ -77,6 +84,7 @@ def segment_cells_from_nuclear_image(
 
 def _segment_binary_mask_with_peak_distance(
     labeled_nuclear_mask: np.ndarray,
+    normalized_cytoplasmic_image: np.ndarray,
     configuration: ApplicationConfiguration,
     peak_minimum_distance_pixels: int,
 ) -> SegmentationResult:
@@ -104,10 +112,21 @@ def _segment_binary_mask_with_peak_distance(
         watershed_labels,
         maximum_area=configuration.segmentation.maximum_nucleus_area_pixels,
     )
-    expanded_cell_labels = segmentation.expand_labels(
-        watershed_labels,
-        distance=configuration.segmentation.cell_expansion_distance_pixels,
+    cell_body_mask = build_cell_body_mask(
+        labeled_nuclear_mask > 0,
+        normalized_cytoplasmic_image,
+        configuration.segmentation.cell_expansion_distance_pixels,
     )
+    expanded_cell_labels = segmentation.watershed(
+        -normalized_cytoplasmic_image,
+        watershed_labels,
+        mask=cell_body_mask,
+    )
+    if int(expanded_cell_labels.max()) == 0:
+        expanded_cell_labels = segmentation.expand_labels(
+            watershed_labels,
+            distance=configuration.segmentation.cell_expansion_distance_pixels,
+        )
     expanded_cell_labels = remove_small_segmentation_labels(
         expanded_cell_labels,
         minimum_area=80,
@@ -132,6 +151,27 @@ def _segment_binary_mask_with_peak_distance(
         ),
         chosen_peak_minimum_distance_pixels=peak_minimum_distance_pixels,
     )
+
+
+def build_cell_body_mask(
+    nuclear_mask: np.ndarray,
+    normalized_cytoplasmic_image: np.ndarray,
+    expansion_distance_pixels: int,
+) -> np.ndarray:
+    if np.allclose(normalized_cytoplasmic_image, normalized_cytoplasmic_image.flat[0]):
+        return morphology.binary_dilation(
+            nuclear_mask,
+            morphology.disk(expansion_distance_pixels),
+        )
+    cytoplasmic_threshold = filters.threshold_otsu(normalized_cytoplasmic_image)
+    cytoplasmic_mask = normalized_cytoplasmic_image > cytoplasmic_threshold
+    if not np.any(cytoplasmic_mask):
+        cytoplasmic_mask = nuclear_mask.copy()
+    expanded_nuclear_mask = morphology.binary_dilation(
+        nuclear_mask,
+        morphology.disk(expansion_distance_pixels),
+    )
+    return cytoplasmic_mask | expanded_nuclear_mask
 
 
 def percentile_normalize_image(

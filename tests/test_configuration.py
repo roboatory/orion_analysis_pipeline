@@ -3,36 +3,34 @@ from pathlib import Path
 import pytest
 import yaml
 
-from orion.configuration import load_configuration
+from src.configuration import load_configuration
 
 
-def base_configuration_dictionary(temporary_path: Path) -> dict:
+def base_configuration_dictionary(temporary_path: Path) -> dict[str, object]:
     readouts_path = temporary_path / "readouts.tiff"
     markers_path = temporary_path / "markers.csv"
     readouts_path.write_bytes(b"fake")
-    markers_path.write_text("Hoechst\nAF1\nCD45\n", encoding="utf-8")
+    markers_path.write_text("Hoechst\nAF1\nPan-CK\nCD45\n", encoding="utf-8")
     return {
         "sample_identifier": "TEST",
         "input_paths": {
             "readouts": str(readouts_path),
             "markers": str(markers_path),
             "histology": None,
-            "existing_segmentation": None,
-            "existing_quantifications": None,
         },
         "output_directory": str(temporary_path / "outputs"),
         "channels": {
             "nuclear_marker": "Hoechst",
+            "cytoplasmic_marker": "Pan-CK",
             "autofluorescence_marker": "AF1",
-            "technical_markers": ["Hoechst", "AF1"],
         },
         "region_of_interest": {
             "patch_width_pixels": 64,
             "patch_height_pixels": 64,
-            "stride_pixels": 32,
-            "minimum_cells": 10,
-            "top_candidate_count_for_raw_quality_control": 5,
-            "manual_override": None,
+            "candidate_patch_count": 4,
+            "minimum_tissue_fraction": 0.25,
+            "minimum_informative_channel_fraction": 0.5,
+            "minimum_channel_signal_spread": 0.05,
         },
         "preprocessing": {
             "autofluorescence_subtraction": {
@@ -72,7 +70,8 @@ def base_configuration_dictionary(temporary_path: Path) -> dict:
 
 
 def write_configuration_file(
-    temporary_path: Path, configuration_dictionary: dict
+    temporary_path: Path,
+    configuration_dictionary: dict[str, object],
 ) -> Path:
     configuration_path = temporary_path / "configuration.yaml"
     configuration_path.write_text(
@@ -138,6 +137,14 @@ def test_technical_annotation_marker_rejected(tmp_path: Path) -> None:
     configuration_dictionary["annotation"]["cell_types"] = [
         {"name": "Background", "positive_markers": ["AF1"]},
     ]
+    configuration_path = write_configuration_file(tmp_path, configuration_dictionary)
+    with pytest.raises(ValueError):
+        load_configuration(configuration_path)
+
+
+def test_cytoplasmic_marker_must_differ_from_nuclear_marker(tmp_path: Path) -> None:
+    configuration_dictionary = base_configuration_dictionary(tmp_path)
+    configuration_dictionary["channels"]["cytoplasmic_marker"] = "Hoechst"
     configuration_path = write_configuration_file(tmp_path, configuration_dictionary)
     with pytest.raises(ValueError):
         load_configuration(configuration_path)

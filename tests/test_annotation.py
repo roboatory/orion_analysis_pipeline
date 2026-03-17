@@ -1,7 +1,7 @@
 import polars as pl
 
-from orion.configuration import ApplicationConfiguration
-from orion.annotation import annotate_cell_types
+from src.annotation import annotate_cells
+from src.configuration import ApplicationConfiguration
 
 
 def build_configuration(
@@ -14,23 +14,16 @@ def build_configuration(
                 "readouts": "data/CRC33_01/readouts.tiff",
                 "markers": "data/CRC33_01/markers.csv",
                 "histology": None,
-                "existing_segmentation": None,
-                "existing_quantifications": None,
             },
             "output_directory": "outputs",
             "channels": {
                 "nuclear_marker": "Hoechst",
+                "cytoplasmic_marker": "Pan-CK",
                 "autofluorescence_marker": "AF1",
-                "technical_markers": ["Hoechst", "AF1", "Argo550"],
             },
             "region_of_interest": {
-                "selection_mode": "auto",
                 "patch_width_pixels": 64,
                 "patch_height_pixels": 64,
-                "stride_pixels": 32,
-                "minimum_cells": 10,
-                "top_candidate_count_for_raw_quality_control": 5,
-                "manual_override": None,
             },
             "preprocessing": {
                 "autofluorescence_subtraction": {
@@ -66,90 +59,84 @@ def build_configuration(
     )
 
 
+def build_cell_features(**marker_values: float) -> pl.DataFrame:
+    row = {
+        "cell_identifier": 1,
+        "x_pixels": 1.0,
+        "y_pixels": 2.0,
+        "x_micrometers": 0.5,
+        "y_micrometers": 1.0,
+        **marker_values,
+    }
+    return pl.DataFrame([row])
+
+
 def test_single_marker_match_assigns_configured_cell_type() -> None:
     configuration = build_configuration(
         [{"name": "B_cell", "positive_markers": ["CD20"]}]
     )
-    thresholded_data_frame = pl.DataFrame(
-        [
-            {
-                "CD20_high": True,
-            }
-        ]
+    annotation_result = annotate_cells(
+        build_cell_features(CD20=1000.0),
+        configuration,
     )
-    annotated_data_frame = annotate_cell_types(thresholded_data_frame, configuration)
-    assert annotated_data_frame[0, "cell_type"] == "B_cell"
-    assert annotated_data_frame[0, "matched_cell_type_count"] == 1
+    assert annotation_result.cell_annotations[0, "cell_type"] == "B_cell"
 
 
 def test_multi_marker_rule_requires_all_positive_markers() -> None:
     configuration = build_configuration(
         [{"name": "Treg", "positive_markers": ["CD4", "FOXP3"]}]
     )
-    thresholded_data_frame = pl.DataFrame(
-        [
-            {
-                "CD4_high": True,
-                "FOXP3_high": False,
-            }
-        ]
+    annotation_result = annotate_cells(
+        pl.DataFrame(
+            [
+                {
+                    "cell_identifier": 1,
+                    "x_pixels": 1.0,
+                    "y_pixels": 2.0,
+                    "x_micrometers": 0.5,
+                    "y_micrometers": 1.0,
+                    "CD4": 1000.0,
+                    "FOXP3": 0.0,
+                },
+                {
+                    "cell_identifier": 2,
+                    "x_pixels": 3.0,
+                    "y_pixels": 4.0,
+                    "x_micrometers": 1.5,
+                    "y_micrometers": 2.0,
+                    "CD4": 1000.0,
+                    "FOXP3": 1000.0,
+                },
+            ]
+        ),
+        configuration,
     )
-    annotated_data_frame = annotate_cell_types(thresholded_data_frame, configuration)
-    assert annotated_data_frame[0, "cell_type"] == "Unassigned"
+    assert annotation_result.cell_annotations[0, "cell_type"] == "Other"
 
 
-def test_cell_with_no_matches_becomes_unassigned() -> None:
-    configuration = build_configuration(
-        [{"name": "Macrophage", "positive_markers": ["CD68"]}]
-    )
-    thresholded_data_frame = pl.DataFrame(
-        [
-            {
-                "CD68_high": False,
-            }
-        ]
-    )
-    annotated_data_frame = annotate_cell_types(thresholded_data_frame, configuration)
-    assert annotated_data_frame[0, "cell_type"] == "Unassigned"
-    assert annotated_data_frame[0, "matched_cell_type_names"] == ""
-
-
-def test_cell_matching_multiple_rules_becomes_ambiguous() -> None:
+def test_multiple_matches_collapse_to_other() -> None:
     configuration = build_configuration(
         [
             {"name": "B_cell", "positive_markers": ["CD20"]},
             {"name": "Plasma_like", "positive_markers": ["CD20"]},
         ]
     )
-    thresholded_data_frame = pl.DataFrame([{"CD20_high": True}])
-    annotated_data_frame = annotate_cell_types(thresholded_data_frame, configuration)
-    assert annotated_data_frame[0, "cell_type"] == "Ambiguous"
-    assert annotated_data_frame[0, "matched_cell_type_count"] == 2
-
-
-def test_exclusive_marker_matching_rejects_other_cell_type_markers() -> None:
-    configuration = build_configuration(
-        [
-            {"name": "B_cell", "positive_markers": ["CD20"]},
-            {"name": "T_cell", "positive_markers": ["CD3e"]},
-        ]
+    annotation_result = annotate_cells(
+        build_cell_features(CD20=1000.0),
+        configuration,
     )
-    thresholded_data_frame = pl.DataFrame([{"CD20_high": True, "CD3e_high": True}])
-    annotated_data_frame = annotate_cell_types(thresholded_data_frame, configuration)
-    assert annotated_data_frame[0, "cell_type"] == "Unassigned"
-    assert annotated_data_frame[0, "matched_cell_type_count"] == 0
+    assert annotation_result.cell_annotations[0, "cell_type"] == "Other"
 
 
-def test_missing_thresholded_marker_column_fails_fast() -> None:
+def test_missing_marker_column_fails_fast() -> None:
     configuration = build_configuration(
         [{"name": "B_cell", "positive_markers": ["CD20"]}]
     )
-    thresholded_data_frame = pl.DataFrame([{"CD3e_high": True}])
     try:
-        annotate_cell_types(thresholded_data_frame, configuration)
+        annotate_cells(build_cell_features(CD3e=1000.0), configuration)
     except ValueError as value_error:
         assert "CD20" in str(value_error)
     else:
         raise AssertionError(
-            "Expected annotation to fail when thresholded marker columns are missing."
+            "Expected annotation to fail when marker columns are missing."
         )

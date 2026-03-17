@@ -1,24 +1,38 @@
 from __future__ import annotations
 
 import xml.etree.ElementTree as xml_element_tree
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
+import polars as pl
 import tifffile
+import yaml
 
-from orion.configuration import ApplicationConfiguration
-from orion.data_models import SlideMetadata
-from orion.input_output import read_marker_names
+from src.data_models import RegionOfInterestBox, SlideMetadata
+
+if TYPE_CHECKING:
+    from src.configuration import ApplicationConfiguration
+
+
+def ensure_directory(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def read_marker_names(path: Path) -> list[str]:
+    with path.open("r", encoding="utf-8") as file_handle:
+        return [line.strip() for line in file_handle if line.strip()]
 
 
 def load_slide_metadata(configuration: ApplicationConfiguration) -> SlideMetadata:
     marker_names = read_marker_names(configuration.input_paths.markers)
     with tifffile.TiffFile(configuration.input_paths.readouts) as tiff_file:
         primary_series = tiff_file.series[0]
-        open_microscopy_environment_xml = tiff_file.ome_metadata
         (
             open_microscopy_environment_channel_names,
             physical_size_x_micrometers,
             physical_size_y_micrometers,
-        ) = parse_open_microscopy_environment_metadata(open_microscopy_environment_xml)
+        ) = parse_open_microscopy_environment_metadata(tiff_file.ome_metadata)
         channel_count, height_pixels, width_pixels = primary_series.shape
     if physical_size_x_micrometers is None or physical_size_y_micrometers is None:
         raise ValueError(
@@ -33,7 +47,6 @@ def load_slide_metadata(configuration: ApplicationConfiguration) -> SlideMetadat
     return SlideMetadata(
         readouts_path=configuration.input_paths.readouts,
         histology_path=configuration.input_paths.histology,
-        segmentation_path=configuration.input_paths.existing_segmentation,
         width_pixels=width_pixels,
         height_pixels=height_pixels,
         channel_count=channel_count,
@@ -69,3 +82,63 @@ def parse_open_microscopy_environment_metadata(
         if physical_size_y_micrometers is not None
         else None,
     )
+
+
+def read_readouts_region_of_interest(
+    path: Path, region_of_interest: RegionOfInterestBox
+) -> Any:
+    return tifffile.imread(
+        path,
+        selection=(
+            slice(None),
+            slice(region_of_interest.y_pixels, region_of_interest.y_end_pixels),
+            slice(region_of_interest.x_pixels, region_of_interest.x_end_pixels),
+        ),
+    )
+
+
+def read_histology_region_of_interest(
+    path: Path, region_of_interest: RegionOfInterestBox
+) -> Any:
+    return tifffile.imread(
+        path,
+        selection=(
+            slice(region_of_interest.y_pixels, region_of_interest.y_end_pixels),
+            slice(region_of_interest.x_pixels, region_of_interest.x_end_pixels),
+            slice(None),
+        ),
+    )
+
+
+def write_csv(data_frame: pl.DataFrame, path: Path) -> Path:
+    ensure_directory(path.parent)
+    data_frame.write_csv(path)
+    return path
+
+
+def write_yaml_file(path: Path, payload: dict[str, Any]) -> None:
+    ensure_directory(path.parent)
+    with path.open("w", encoding="utf-8") as file_handle:
+        yaml.safe_dump(payload, file_handle, sort_keys=False)
+
+
+def write_image_stack(path: Path, image_stack: Any, marker_names: list[str]) -> Path:
+    ensure_directory(path.parent)
+    tifffile.imwrite(
+        path,
+        image_stack,
+        metadata={"axes": "CYX", "markers": marker_names},
+    )
+    return path
+
+
+def write_label_image(path: Path, label_image: Any) -> Path:
+    ensure_directory(path.parent)
+    tifffile.imwrite(path, label_image)
+    return path
+
+
+def write_rgb_image(path: Path, image: Any) -> Path:
+    ensure_directory(path.parent)
+    tifffile.imwrite(path, image)
+    return path
