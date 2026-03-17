@@ -33,7 +33,6 @@ class RegionOfInterestBox:
 class SlideMetadata:
     readouts_path: Path
     histology_path: Path | None
-    segmentation_path: Path | None
     width_pixels: int
     height_pixels: int
     channel_count: int
@@ -46,9 +45,6 @@ class SlideMetadata:
         return {
             "readouts_path": str(self.readouts_path),
             "histology_path": str(self.histology_path) if self.histology_path else None,
-            "segmentation_path": str(self.segmentation_path)
-            if self.segmentation_path
-            else None,
             "width_pixels": self.width_pixels,
             "height_pixels": self.height_pixels,
             "channel_count": self.channel_count,
@@ -56,34 +52,6 @@ class SlideMetadata:
             "pixel_size_y_micrometers": self.pixel_size_y_micrometers,
             "open_microscopy_environment_channel_names": self.open_microscopy_environment_channel_names,
             "marker_names": self.marker_names,
-        }
-
-
-@dataclass(frozen=True)
-class RegionOfInterestCandidateScore:
-    region_of_interest: RegionOfInterestBox
-    cell_count: int
-    diversity_score: float
-    density_score: float
-    coarse_score: float
-    hoechst_contrast: float | None = None
-    focus_variance_of_laplacian: float | None = None
-    autofluorescence_burden: float | None = None
-    saturation_fraction: float | None = None
-    final_score: float | None = None
-
-    def as_dictionary(self) -> dict[str, Any]:
-        return {
-            **self.region_of_interest.as_dictionary(),
-            "cell_count": self.cell_count,
-            "diversity_score": self.diversity_score,
-            "density_score": self.density_score,
-            "coarse_score": self.coarse_score,
-            "hoechst_contrast": self.hoechst_contrast,
-            "focus_variance_of_laplacian": self.focus_variance_of_laplacian,
-            "autofluorescence_burden": self.autofluorescence_burden,
-            "saturation_fraction": self.saturation_fraction,
-            "final_score": self.final_score,
         }
 
 

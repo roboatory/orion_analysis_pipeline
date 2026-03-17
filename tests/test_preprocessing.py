@@ -1,6 +1,6 @@
 import numpy as np
 
-from orion.preprocessing import preprocess_region_of_interest_patch
+from src.preprocessing import preprocess_region_of_interest_patch
 
 
 class DummyAutofluorescenceSubtractionConfiguration:
@@ -15,7 +15,8 @@ class DummyPercentileClipConfiguration:
 
 
 class DummyChannelConfiguration:
-    technical_markers = ["Hoechst", "AF1"]
+    nuclear_marker = "Hoechst"
+    cytoplasmic_marker = "Pan-CK"
     autofluorescence_marker = "AF1"
 
 

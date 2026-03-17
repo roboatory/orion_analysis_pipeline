@@ -5,7 +5,7 @@ import polars as pl
 from scipy import ndimage as scipy_ndimage
 from skimage import measure
 
-from orion.data_models import RegionOfInterestBox
+from src.data_models import RegionOfInterestBox
 
 
 def quantify_cells_in_region_of_interest(

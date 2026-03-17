@@ -11,8 +11,9 @@ wheels/
 
 # Apple files
 *.DS_Store
-ß
+
 # Project files
 data/
 plans/
 outputs/
+logs/

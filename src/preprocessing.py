@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from orion.configuration import ApplicationConfiguration
+from src.configuration import ApplicationConfiguration
 
 
 @dataclass(frozen=True)
@@ -20,7 +20,6 @@ def preprocess_region_of_interest_patch(
     configuration: ApplicationConfiguration,
     random_seed: int = 7,
 ) -> PreprocessingResult:
-    technical_marker_names = set(configuration.channels.technical_markers)
     marker_name_to_index = {
         marker_name: index for index, marker_name in enumerate(marker_names)
     }
@@ -67,10 +66,7 @@ def preprocess_region_of_interest_patch(
 
     for marker_name, marker_index in marker_name_to_index.items():
         current_channel = corrected_image_stack[marker_index]
-        if (
-            marker_name in technical_marker_names
-            or marker_name == configuration.channels.autofluorescence_marker
-        ):
+        if marker_name == configuration.channels.autofluorescence_marker:
             autofluorescence_scale_by_marker[marker_name] = 0.0
             continue
         clipped_channel_values = clip_upper_intensity(
