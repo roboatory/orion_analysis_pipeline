@@ -8,6 +8,7 @@ from skimage import feature, filters, measure, morphology, segmentation
 
 from src.configuration import ApplicationConfiguration
 from src.data_models import SegmentationValidationSummary
+from src.io import percentile_normalize_image
 
 
 @dataclass(frozen=True)
@@ -15,8 +16,6 @@ class SegmentationResult:
     nuclei_labels: np.ndarray
     expanded_cell_labels: np.ndarray
     kept_cell_labels: np.ndarray
-    boundary_touching_count: int
-    removed_small_label_count: int
     chosen_peak_minimum_distance_pixels: int
 
 
@@ -132,7 +131,6 @@ def _segment_binary_mask_with_peak_distance(
         minimum_area=80,
     )
     boundary_touching_labels = find_labels_touching_boundary(expanded_cell_labels)
-    boundary_touching_count = len(boundary_touching_labels)
     kept_cell_labels = expanded_cell_labels.copy()
     if boundary_touching_labels:
         boundary_touching_mask = np.isin(
@@ -145,10 +143,6 @@ def _segment_binary_mask_with_peak_distance(
         nuclei_labels=relabel_sequentially(watershed_labels),
         expanded_cell_labels=expanded_cell_labels,
         kept_cell_labels=kept_cell_labels,
-        boundary_touching_count=boundary_touching_count,
-        removed_small_label_count=int(
-            expanded_cell_labels.max() - kept_cell_labels.max()
-        ),
         chosen_peak_minimum_distance_pixels=peak_minimum_distance_pixels,
     )
 
@@ -172,19 +166,6 @@ def build_cell_body_mask(
         morphology.disk(expansion_distance_pixels),
     )
     return cytoplasmic_mask | expanded_nuclear_mask
-
-
-def percentile_normalize_image(
-    image: np.ndarray,
-    lower_quantile: float,
-    upper_quantile: float,
-) -> np.ndarray:
-    lower_intensity = float(np.quantile(image, lower_quantile))
-    upper_intensity = float(np.quantile(image, upper_quantile))
-    if upper_intensity <= lower_intensity:
-        return np.zeros_like(image, dtype=np.float32)
-    clipped_image = np.clip(image.astype(np.float32), lower_intensity, upper_intensity)
-    return (clipped_image - lower_intensity) / (upper_intensity - lower_intensity)
 
 
 def remove_large_segmentation_labels(

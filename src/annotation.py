@@ -12,7 +12,6 @@ from src.configuration import ApplicationConfiguration
 @dataclass(frozen=True)
 class AnnotationResult:
     cell_annotations: pl.DataFrame
-    marker_thresholds: dict[str, float]
 
 
 def annotate_cells(
@@ -22,7 +21,6 @@ def annotate_cells(
     validate_annotation_marker_columns(cell_features, configuration)
     annotation_marker_names = configuration.annotation_marker_names
     annotated_cell_measurements = cell_features.clone()
-    marker_thresholds: dict[str, float] = {}
 
     for marker_name in annotation_marker_names:
         normalized_column_name = f"{marker_name}_arcsinh"
@@ -36,7 +34,6 @@ def annotate_cells(
             normalized_column_name
         ].to_numpy()
         threshold_value = compute_marker_threshold(normalized_values, configuration)
-        marker_thresholds[marker_name] = threshold_value
         annotated_cell_measurements = annotated_cell_measurements.with_columns(
             (pl.col(normalized_column_name) >= threshold_value).alias(
                 threshold_column_name
@@ -74,7 +71,7 @@ def annotate_cells(
                 thresholded_row[f"{marker_name}_high"]
             )
         annotation_rows.append(annotation_row)
-    return AnnotationResult(pl.DataFrame(annotation_rows), marker_thresholds)
+    return AnnotationResult(pl.DataFrame(annotation_rows))
 
 
 def validate_annotation_marker_columns(
