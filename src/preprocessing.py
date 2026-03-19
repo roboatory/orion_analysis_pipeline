@@ -5,13 +5,13 @@ from dataclasses import dataclass
 import numpy as np
 
 from src.configuration import ApplicationConfiguration
+from src.io import build_marker_name_to_index
 
 
 @dataclass(frozen=True)
 class PreprocessingResult:
     corrected_image_stack: np.ndarray
     autofluorescence_scale_by_marker: dict[str, float]
-    corrected_image_by_marker: dict[str, np.ndarray]
 
 
 def preprocess_region_of_interest_patch(
@@ -20,9 +20,7 @@ def preprocess_region_of_interest_patch(
     configuration: ApplicationConfiguration,
     random_seed: int = 7,
 ) -> PreprocessingResult:
-    marker_name_to_index = {
-        marker_name: index for index, marker_name in enumerate(marker_names)
-    }
+    marker_name_to_index = build_marker_name_to_index(marker_names)
     autofluorescence_index = marker_name_to_index[
         configuration.channels.autofluorescence_marker
     ]
@@ -33,14 +31,9 @@ def preprocess_region_of_interest_patch(
     autofluorescence_scale_by_marker: dict[str, float] = {}
 
     if not configuration.preprocessing.autofluorescence_subtraction.enabled:
-        corrected_image_by_marker = {
-            marker_name: corrected_image_stack[index]
-            for index, marker_name in enumerate(marker_names)
-        }
         return PreprocessingResult(
             corrected_image_stack=corrected_image_stack,
             autofluorescence_scale_by_marker=autofluorescence_scale_by_marker,
-            corrected_image_by_marker=corrected_image_by_marker,
         )
 
     random_number_generator = np.random.default_rng(random_seed)
@@ -87,14 +80,9 @@ def preprocess_region_of_interest_patch(
         )
         autofluorescence_scale_by_marker[marker_name] = autofluorescence_scale
 
-    corrected_image_by_marker = {
-        marker_name: corrected_image_stack[index]
-        for index, marker_name in enumerate(marker_names)
-    }
     return PreprocessingResult(
         corrected_image_stack=corrected_image_stack,
         autofluorescence_scale_by_marker=autofluorescence_scale_by_marker,
-        corrected_image_by_marker=corrected_image_by_marker,
     )
 
 

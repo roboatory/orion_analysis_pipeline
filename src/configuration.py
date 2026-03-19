@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from src.data_models import RegionOfInterestBox
 from src.io import read_marker_names
@@ -23,8 +23,6 @@ class ChannelConfiguration(BaseModel):
 
 
 class RegionOfInterestConfiguration(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
     patch_width_pixels: int
     patch_height_pixels: int
     candidate_patch_count: int = Field(default=12, ge=1)
@@ -155,14 +153,6 @@ class ApplicationConfiguration(BaseModel):
                         f"'{positive_marker_name}' cannot be the autofluorescence marker."
                     )
         return self
-
-    @property
-    def biological_marker_names(self) -> list[str]:
-        return [
-            marker_name
-            for marker_name in self.marker_names
-            if marker_name != self.channels.autofluorescence_marker
-        ]
 
     @property
     def marker_names(self) -> list[str]:

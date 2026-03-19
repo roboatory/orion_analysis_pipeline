@@ -7,7 +7,7 @@ from pathlib import Path
 import polars as pl
 
 from runtime_logging import capture_runtime_logging, resolve_log_path
-from src.annotation import AnnotationResult, annotate_cells
+from src.annotation import annotate_cells
 from src.configuration import (
     ApplicationConfiguration,
     convert_model_to_dictionary,
@@ -15,25 +15,24 @@ from src.configuration import (
 )
 from src.data_models import SlideMetadata
 from src.io import (
+    build_marker_name_to_index,
     ensure_directory,
     load_slide_metadata,
     read_histology_region_of_interest,
     read_readouts_region_of_interest,
+    save_cell_assignment_map,
+    save_preprocessing_comparison,
+    save_segmentation_overlay_image,
     write_csv,
     write_image_stack,
     write_label_image,
     write_yaml_file,
 )
-from src.preprocessing import PreprocessingResult, preprocess_region_of_interest_patch
-from src.quality_control import (
-    save_cell_assignment_map,
-    save_preprocessing_comparison,
-    save_segmentation_overlay_image,
-)
+from src.preprocessing import preprocess_region_of_interest_patch
 from src.quantification import quantify_cells_in_region_of_interest
 from src.region_of_interest import choose_region_of_interest
-from src.segmentation import SegmentationResult, segment_cells_from_marker_images
-from src.spatial_analysis import SpatialAnalysisResult, compute_spatial_analysis
+from src.segmentation import segment_cells_from_marker_images
+from src.spatial_analysis import compute_spatial_analysis
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -54,23 +53,14 @@ def run_patch_pipeline(
     configuration: ApplicationConfiguration,
     logger: logging.Logger,
 ) -> None:
-    slide_metadata: SlideMetadata = load_slide_metadata(configuration)
-    logger.info("mode: %s", "patch")
-    logger.info("sample_identifier: %s", configuration.sample_identifier)
-    logger.info("readouts: %s", configuration.input_paths.readouts)
-    logger.info("marker_count: %s", len(slide_metadata.marker_names))
-    logger.info("image_width_pixels: %s", slide_metadata.width_pixels)
-    logger.info("image_height_pixels: %s", slide_metadata.height_pixels)
-    logger.info("pixel_size_x_micrometers: %s", slide_metadata.pixel_size_x_micrometers)
-    logger.info("pixel_size_y_micrometers: %s", slide_metadata.pixel_size_y_micrometers)
+    slide_metadata = load_slide_metadata(configuration)
+    log_slide_metadata(configuration, slide_metadata, logger)
     sample_output_directory = ensure_directory(configuration.sample_output_directory)
     selected_region_of_interest, candidate_data_frame = choose_region_of_interest(
         configuration,
         slide_metadata,
     )
-    selected_candidate = candidate_data_frame.filter(pl.col("selected")).to_dicts()
-    if selected_candidate:
-        logger.info("region_of_interest_quality: %s", selected_candidate[0])
+    log_selected_region_of_interest(candidate_data_frame, logger)
 
     raw_readout_stack = read_readouts_region_of_interest(
         configuration.input_paths.readouts,
@@ -84,19 +74,16 @@ def run_patch_pipeline(
         if configuration.input_paths.histology
         else None
     )
-    preprocessing_result: PreprocessingResult = preprocess_region_of_interest_patch(
+    preprocessing_result = preprocess_region_of_interest_patch(
         raw_readout_stack,
         slide_metadata.marker_names,
         configuration,
     )
 
-    marker_name_to_index = {
-        marker_name: index
-        for index, marker_name in enumerate(slide_metadata.marker_names)
-    }
+    marker_name_to_index = build_marker_name_to_index(slide_metadata.marker_names)
     nuclear_index = marker_name_to_index[configuration.channels.nuclear_marker]
     cytoplasmic_index = marker_name_to_index[configuration.channels.cytoplasmic_marker]
-    segmentation_result: SegmentationResult = segment_cells_from_marker_images(
+    segmentation_result = segment_cells_from_marker_images(
         preprocessing_result.corrected_image_stack[nuclear_index],
         preprocessing_result.corrected_image_stack[cytoplasmic_index],
         configuration,
@@ -118,8 +105,8 @@ def run_patch_pipeline(
         slide_metadata.pixel_size_x_micrometers,
         slide_metadata.pixel_size_y_micrometers,
     )
-    annotation_result: AnnotationResult = annotate_cells(cell_features, configuration)
-    spatial_analysis_result: SpatialAnalysisResult = compute_spatial_analysis(
+    annotation_result = annotate_cells(cell_features, configuration)
+    spatial_analysis_result = compute_spatial_analysis(
         annotation_result.cell_annotations,
         configuration,
     )
@@ -181,6 +168,30 @@ def run_patch_pipeline(
         "selected_region_of_interest: %s",
         selected_region_of_interest.as_dictionary(),
     )
+
+
+def log_slide_metadata(
+    configuration: ApplicationConfiguration,
+    slide_metadata: SlideMetadata,
+    logger: logging.Logger,
+) -> None:
+    logger.info("mode: %s", "patch")
+    logger.info("sample_identifier: %s", configuration.sample_identifier)
+    logger.info("readouts: %s", configuration.input_paths.readouts)
+    logger.info("marker_count: %s", len(slide_metadata.marker_names))
+    logger.info("image_width_pixels: %s", slide_metadata.width_pixels)
+    logger.info("image_height_pixels: %s", slide_metadata.height_pixels)
+    logger.info("pixel_size_x_micrometers: %s", slide_metadata.pixel_size_x_micrometers)
+    logger.info("pixel_size_y_micrometers: %s", slide_metadata.pixel_size_y_micrometers)
+
+
+def log_selected_region_of_interest(
+    candidate_data_frame: pl.DataFrame,
+    logger: logging.Logger,
+) -> None:
+    selected_candidate = candidate_data_frame.filter(pl.col("selected")).to_dicts()
+    if selected_candidate:
+        logger.info("region_of_interest_quality: %s", selected_candidate[0])
 
 
 def main(argument_values: list[str] | None = None) -> int:

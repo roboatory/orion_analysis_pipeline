@@ -9,7 +9,11 @@ from skimage.filters import threshold_otsu
 
 from src.configuration import ApplicationConfiguration
 from src.data_models import RegionOfInterestBox, SlideMetadata
-from src.io import read_readouts_region_of_interest
+from src.io import (
+    build_marker_name_to_index,
+    percentile_normalize_image,
+    read_readouts_region_of_interest,
+)
 
 
 def choose_region_of_interest(
@@ -23,49 +27,16 @@ def choose_region_of_interest(
         slide_metadata,
         random_seed,
     )
-    candidate_rows: list[dict[str, object]] = []
-
-    for region_of_interest in candidate_regions_of_interest:
-        readout_patch = read_readouts_region_of_interest(
-            slide_metadata.readouts_path,
-            region_of_interest,
-        )
-        quality_metrics = score_region_of_interest_patch(
-            readout_patch,
-            slide_metadata.marker_names,
+    candidate_rows = [
+        build_candidate_row(
             configuration,
+            slide_metadata,
+            region_of_interest,
+            random_seed,
         )
-        passes_quality_thresholds = bool(
-            quality_metrics["tissue_fraction"]
-            >= configuration.region_of_interest.minimum_tissue_fraction
-            and quality_metrics["informative_channel_fraction"]
-            >= configuration.region_of_interest.minimum_informative_channel_fraction
-        )
-        candidate_rows.append(
-            {
-                "selection_mode": "seeded_random_best_of_n",
-                "random_seed": random_seed,
-                **region_of_interest.as_dictionary(),
-                **quality_metrics,
-                "passes_quality_thresholds": passes_quality_thresholds,
-                "selected": False,
-            }
-        )
-
-    candidate_data_frame = pl.DataFrame(candidate_rows).sort(
-        ["passes_quality_thresholds", "quality_score"],
-        descending=[True, True],
-    )
-    selected_index = 0
-    candidate_data_frame = candidate_data_frame.with_columns(
-        pl.Series(
-            "selected",
-            [
-                row_index == selected_index
-                for row_index in range(candidate_data_frame.height)
-            ],
-        )
-    )
+        for region_of_interest in candidate_regions_of_interest
+    ]
+    candidate_data_frame = build_candidate_data_frame(candidate_rows)
     selected_row = candidate_data_frame.row(0, named=True)
     selected_region_of_interest = RegionOfInterestBox(
         x_pixels=int(selected_row["x_pixels"]),
@@ -74,6 +45,59 @@ def choose_region_of_interest(
         height_pixels=int(selected_row["height_pixels"]),
     )
     return selected_region_of_interest, candidate_data_frame
+
+
+def build_candidate_row(
+    configuration: ApplicationConfiguration,
+    slide_metadata: SlideMetadata,
+    region_of_interest: RegionOfInterestBox,
+    random_seed: int,
+) -> dict[str, object]:
+    readout_patch = read_readouts_region_of_interest(
+        slide_metadata.readouts_path,
+        region_of_interest,
+    )
+    quality_metrics = score_region_of_interest_patch(
+        readout_patch,
+        slide_metadata.marker_names,
+        configuration,
+    )
+    return {
+        "selection_mode": "seeded_random_best_of_n",
+        "random_seed": random_seed,
+        **region_of_interest.as_dictionary(),
+        **quality_metrics,
+        "passes_quality_thresholds": passes_quality_thresholds(
+            quality_metrics,
+            configuration,
+        ),
+        "selected": False,
+    }
+
+
+def passes_quality_thresholds(
+    quality_metrics: dict[str, float],
+    configuration: ApplicationConfiguration,
+) -> bool:
+    return bool(
+        quality_metrics["tissue_fraction"]
+        >= configuration.region_of_interest.minimum_tissue_fraction
+        and quality_metrics["informative_channel_fraction"]
+        >= configuration.region_of_interest.minimum_informative_channel_fraction
+    )
+
+
+def build_candidate_data_frame(candidate_rows: list[dict[str, object]]) -> pl.DataFrame:
+    candidate_data_frame = pl.DataFrame(candidate_rows).sort(
+        ["passes_quality_thresholds", "quality_score"],
+        descending=[True, True],
+    )
+    return candidate_data_frame.with_columns(
+        pl.Series(
+            "selected",
+            [row_index == 0 for row_index in range(candidate_data_frame.height)],
+        )
+    )
 
 
 def validate_region_of_interest_bounds(
@@ -152,10 +176,7 @@ def score_region_of_interest_patch(
     marker_names: list[str],
     configuration: ApplicationConfiguration,
 ) -> dict[str, float]:
-    marker_name_to_index = {
-        marker_name: marker_index
-        for marker_index, marker_name in enumerate(marker_names)
-    }
+    marker_name_to_index = build_marker_name_to_index(marker_names)
     tissue_fraction = compute_tissue_fraction(
         readout_patch[marker_name_to_index[configuration.channels.nuclear_marker]],
         readout_patch[marker_name_to_index[configuration.channels.cytoplasmic_marker]],
@@ -235,16 +256,3 @@ def compute_informative_channel_fraction(
     if biological_marker_count == 0:
         return 0.0
     return float(informative_channel_count / biological_marker_count)
-
-
-def percentile_normalize_image(
-    image: np.ndarray,
-    lower_quantile: float = 0.01,
-    upper_quantile: float = 0.99,
-) -> np.ndarray:
-    image = image.astype(np.float32, copy=False)
-    lower_value = float(np.quantile(image, lower_quantile))
-    upper_value = float(np.quantile(image, upper_quantile))
-    if upper_value <= lower_value:
-        return np.zeros_like(image, dtype=np.float32)
-    return np.clip((image - lower_value) / (upper_value - lower_value), 0.0, 1.0)
