@@ -16,6 +16,7 @@ def quantify_cells_in_region_of_interest(
     pixel_size_x_micrometers: float,
     pixel_size_y_micrometers: float,
 ) -> pl.DataFrame:
+    """Measure per-cell morphology and mean marker intensities from a segmentation mask."""
     region_properties = measure.regionprops(label_image)
     columns: dict[str, list[float | int]] = {
         "cell_identifier": [],
@@ -39,7 +40,11 @@ def quantify_cells_in_region_of_interest(
     if not region_properties:
         return pl.DataFrame(columns)
 
-    label_identifiers = np.arange(1, label_image.max() + 1, dtype=np.int32)
+    label_identifiers = np.arange(
+        1,
+        label_image.max() + 1,
+        dtype=np.int32,
+    )
     mean_intensity_by_marker = {
         marker_name: scipy_ndimage.mean(
             image,

@@ -23,16 +23,19 @@ matplotlib.use("Agg")
 
 
 def ensure_directory(path: Path) -> Path:
+    """Create the directory and any missing parents, returning the path."""
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def read_marker_names(path: Path) -> list[str]:
+    """Read one marker name per line from a plain-text markers file."""
     with path.open("r", encoding="utf-8") as file_handle:
         return [line.strip() for line in file_handle if line.strip()]
 
 
 def build_marker_name_to_index(marker_names: list[str]) -> dict[str, int]:
+    """Map each marker name to its zero-based channel index."""
     return {
         marker_name: marker_index
         for marker_index, marker_name in enumerate(marker_names)
@@ -44,23 +47,28 @@ def percentile_normalize_image(
     lower_quantile: float = 0.01,
     upper_quantile: float = 0.99,
 ) -> np.ndarray:
+    """Rescale pixel intensities to [0, 1] using the given percentile bounds."""
     image = image.astype(np.float32, copy=False)
     lower_value = float(np.quantile(image, lower_quantile))
     upper_value = float(np.quantile(image, upper_quantile))
     if upper_value <= lower_value:
         return np.zeros_like(image, dtype=np.float32)
-    return np.clip((image - lower_value) / (upper_value - lower_value), 0.0, 1.0)
+    return np.clip(
+        (image - lower_value) / (upper_value - lower_value),
+        0.0,
+        1.0,
+    )
 
 
 def load_slide_metadata(configuration: ApplicationConfiguration) -> SlideMetadata:
+    """Read TIFF dimensions, OME pixel sizes, and marker names into a SlideMetadata."""
     marker_names = read_marker_names(configuration.input_paths.markers)
     with tifffile.TiffFile(configuration.input_paths.readouts) as tiff_file:
         primary_series = tiff_file.series[0]
         (
-            open_microscopy_environment_channel_names,
             physical_size_x_micrometers,
             physical_size_y_micrometers,
-        ) = parse_open_microscopy_environment_metadata(tiff_file.ome_metadata)
+        ) = parse_open_microscopy_environment_pixel_size(tiff_file.ome_metadata)
         channel_count, height_pixels, width_pixels = primary_series.shape
     if physical_size_x_micrometers is None or physical_size_y_micrometers is None:
         raise ValueError(
@@ -77,44 +85,39 @@ def load_slide_metadata(configuration: ApplicationConfiguration) -> SlideMetadat
         histology_path=configuration.input_paths.histology,
         width_pixels=width_pixels,
         height_pixels=height_pixels,
-        channel_count=channel_count,
         pixel_size_x_micrometers=physical_size_x_micrometers,
         pixel_size_y_micrometers=physical_size_y_micrometers,
-        open_microscopy_environment_channel_names=open_microscopy_environment_channel_names,
         marker_names=marker_names,
     )
 
 
-def parse_open_microscopy_environment_metadata(
+def parse_open_microscopy_environment_pixel_size(
     open_microscopy_environment_xml: str | None,
-) -> tuple[list[str], float | None, float | None]:
+) -> tuple[float | None, float | None]:
+    """Extract physical pixel size in micrometers from OME-XML metadata."""
     if not open_microscopy_environment_xml:
-        return [], None, None
+        return None, None
     xml_root = xml_element_tree.fromstring(open_microscopy_environment_xml)
     namespace = {"ome": "http://www.openmicroscopy.org/Schemas/OME/2016-06"}
-    pixel_element = xml_root.find(".//ome:Pixels", namespace)
+    pixel_element = xml_root.find(
+        ".//ome:Pixels",
+        namespace,
+    )
     if pixel_element is None:
-        return [], None, None
-    physical_size_x_micrometers = pixel_element.attrib.get("PhysicalSizeX")
-    physical_size_y_micrometers = pixel_element.attrib.get("PhysicalSizeY")
-    channel_elements = xml_root.findall(".//ome:Channel", namespace)
-    open_microscopy_environment_channel_names = [
-        channel_element.attrib.get("Name", "") for channel_element in channel_elements
-    ]
+        return None, None
+    physical_size_x = pixel_element.attrib.get("PhysicalSizeX")
+    physical_size_y = pixel_element.attrib.get("PhysicalSizeY")
     return (
-        open_microscopy_environment_channel_names,
-        float(physical_size_x_micrometers)
-        if physical_size_x_micrometers is not None
-        else None,
-        float(physical_size_y_micrometers)
-        if physical_size_y_micrometers is not None
-        else None,
+        float(physical_size_x) if physical_size_x is not None else None,
+        float(physical_size_y) if physical_size_y is not None else None,
     )
 
 
 def read_readouts_region_of_interest(
-    path: Path, region_of_interest: RegionOfInterestBox
+    path: Path,
+    region_of_interest: RegionOfInterestBox,
 ) -> Any:
+    """Read a (channels, height, width) patch from a multiplex readouts TIFF."""
     return tifffile.imread(
         path,
         selection=(
@@ -126,8 +129,10 @@ def read_readouts_region_of_interest(
 
 
 def read_histology_region_of_interest(
-    path: Path, region_of_interest: RegionOfInterestBox
+    path: Path,
+    region_of_interest: RegionOfInterestBox,
 ) -> Any:
+    """Read a (height, width, 3) RGB patch from a registered histology TIFF."""
     return tifffile.imread(
         path,
         selection=(
@@ -138,21 +143,36 @@ def read_histology_region_of_interest(
     )
 
 
-# Tabular and configuration outputs
-def write_csv(data_frame: pl.DataFrame, path: Path) -> Path:
+def write_csv(
+    data_frame: pl.DataFrame,
+    path: Path,
+) -> Path:
+    """Write a Polars DataFrame to a CSV file, creating parent directories as needed."""
     ensure_directory(path.parent)
     data_frame.write_csv(path)
     return path
 
 
-def write_yaml_file(path: Path, payload: dict[str, Any]) -> None:
+def write_yaml_file(
+    path: Path,
+    payload: dict[str, Any],
+) -> None:
+    """Serialize a dictionary to a YAML file."""
     ensure_directory(path.parent)
     with path.open("w", encoding="utf-8") as file_handle:
-        yaml.safe_dump(payload, file_handle, sort_keys=False)
+        yaml.safe_dump(
+            payload,
+            file_handle,
+            sort_keys=False,
+        )
 
 
-# TIFF and image outputs
-def write_image_stack(path: Path, image_stack: Any, marker_names: list[str]) -> Path:
+def write_image_stack(
+    path: Path,
+    image_stack: Any,
+    marker_names: list[str],
+) -> Path:
+    """Write a multichannel image stack to a TIFF with CYX axes metadata."""
     ensure_directory(path.parent)
     tifffile.imwrite(
         path,
@@ -162,25 +182,23 @@ def write_image_stack(path: Path, image_stack: Any, marker_names: list[str]) -> 
     return path
 
 
-def write_label_image(path: Path, label_image: Any) -> Path:
+def write_label_image(
+    path: Path,
+    label_image: Any,
+) -> Path:
+    """Write a single-channel segmentation label image to a TIFF."""
     ensure_directory(path.parent)
     tifffile.imwrite(path, label_image)
     return path
 
 
-def write_rgb_image(path: Path, image: Any) -> Path:
-    ensure_directory(path.parent)
-    tifffile.imwrite(path, image)
-    return path
-
-
-# Figure outputs
 def save_preprocessing_comparison(
     original_image: np.ndarray,
     corrected_image: np.ndarray,
     marker_name: str,
     path: Path,
 ) -> Path:
+    """Save a side-by-side comparison of original and AF-corrected images as a PNG."""
     ensure_directory(path.parent)
     figure, axes = plt.subplots(1, 2, figsize=(10, 5))
     axes[0].imshow(original_image, cmap="magma")
@@ -200,6 +218,7 @@ def save_segmentation_overlay_image(
     label_image: np.ndarray,
     path: Path,
 ) -> Path:
+    """Overlay colored segmentation labels onto a background image and save as TIFF."""
     background_rgb = normalize_background_for_overlay(background_image)
     overlay_image = color.label2rgb(
         label_image,
@@ -208,7 +227,9 @@ def save_segmentation_overlay_image(
         alpha=0.35,
     )
     overlay_uint8 = np.clip(overlay_image * 255.0, 0, 255).astype(np.uint8)
-    return write_rgb_image(path, overlay_uint8)
+    ensure_directory(path.parent)
+    tifffile.imwrite(path, overlay_uint8)
+    return path
 
 
 def save_cell_assignment_map(
@@ -217,6 +238,7 @@ def save_cell_assignment_map(
     title: str,
     path: Path,
 ) -> Path:
+    """Plot cell centroids colored by a categorical label column and save as PNG."""
     ensure_directory(path.parent)
     if cell_annotations.is_empty():
         return path
@@ -248,7 +270,12 @@ def save_cell_assignment_map(
             ha="center",
             va="center",
             color="black",
-            bbox={"facecolor": "white", "alpha": 0.75, "edgecolor": "none", "pad": 1.5},
+            bbox={
+                "facecolor": "white",
+                "alpha": 0.75,
+                "edgecolor": "none",
+                "pad": 1.5,
+            },
         )
     axis.set_title(title)
     axis.set_xlabel("x (pixels)")
@@ -281,6 +308,7 @@ def save_cell_assignment_map(
 
 
 def normalize_background_for_overlay(background_image: np.ndarray) -> np.ndarray:
+    """Normalize a grayscale or RGB image to float32 [0, 1] for label overlay compositing."""
     image = background_image.astype(np.float32)
     if image.ndim == 2:
         minimum_value = float(np.min(image))

@@ -41,6 +41,7 @@ def test_autofluorescence_subtraction_non_negative() -> None:
         raw_image_stack,
         ["Hoechst", "AF1", "CD45"],
         DummyApplicationConfiguration(),
+        random_seed=0,
     )
     assert np.all(preprocessing_result.corrected_image_stack >= 0)
 
@@ -53,5 +54,6 @@ def test_autofluorescence_scale_zero_when_channel_zero() -> None:
         raw_image_stack,
         ["Hoechst", "AF1", "CD45"],
         DummyApplicationConfiguration(),
+        random_seed=0,
     )
     assert preprocessing_result.autofluorescence_scale_by_marker["CD45"] == 0.0
