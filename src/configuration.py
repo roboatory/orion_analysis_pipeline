@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
+import pydantic
 import yaml
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, model_validator
 
-from src.data_models import RegionOfInterestBox
 from src.io import read_marker_names
 
 
@@ -48,16 +47,12 @@ class PreprocessingConfiguration(BaseModel):
 
 
 class SegmentationConfiguration(BaseModel):
-    gaussian_sigma: float = 1.2
-    minimum_nucleus_area_pixels: int = 60
-    maximum_nucleus_area_pixels: int = 1500
-    peak_minimum_distance_pixels: int = 6
-    cell_expansion_distance_pixels: int = 6
+    cell_diameter_pixels: float | None = None
+    use_gpu: bool = False
 
 
 class NormalizationConfiguration(BaseModel):
     arcsinh_cofactor: float = 150.0
-    threshold_method: str = "otsu_with_fallback"
     positive_fraction_minimum: float = 0.005
     positive_fraction_maximum: float = 0.70
     fallback_quantile: float = 0.90
@@ -65,8 +60,6 @@ class NormalizationConfiguration(BaseModel):
 
 class SpatialAnalysisConfiguration(BaseModel):
     nearest_neighbor_count: int = 10
-    minimum_cells_per_type_for_pairwise_analysis: int = 25
-    minimum_cells_per_type_for_clustering: int = 50
     permutation_count: int = 100
     neighborhood_cluster_count: int = 6
 
@@ -94,6 +87,7 @@ class ApplicationConfiguration(BaseModel):
 
     @model_validator(mode="after")
     def validate_configuration_paths(self) -> "ApplicationConfiguration":
+        """Verify that all configured input file paths exist on disk."""
         required_paths = [self.input_paths.readouts, self.input_paths.markers]
         for required_path in required_paths:
             if not required_path.exists():
@@ -105,8 +99,10 @@ class ApplicationConfiguration(BaseModel):
         return self
 
     def validate_marker_names(
-        self, marker_names: list[str]
+        self,
+        marker_names: list[str],
     ) -> "ApplicationConfiguration":
+        """Check that all configured marker references resolve to markers in the panel file."""
         allowed_marker_names = set(marker_names)
         for required_marker_name in [
             self.channels.nuclear_marker,
@@ -156,14 +152,17 @@ class ApplicationConfiguration(BaseModel):
 
     @property
     def marker_names(self) -> list[str]:
+        """Read marker names from the configured markers file."""
         return read_marker_names(self.input_paths.markers)
 
     @property
     def sample_output_directory(self) -> Path:
+        """Return the per-sample output directory path."""
         return self.output_directory / self.sample_identifier
 
     @property
     def annotation_marker_names(self) -> list[str]:
+        """Return deduplicated, insertion-ordered marker names used across all annotation rules."""
         seen_marker_names: set[str] = set()
         ordered_marker_names: list[str] = []
         for cell_type_rule in self.annotation.cell_types:
@@ -174,32 +173,14 @@ class ApplicationConfiguration(BaseModel):
         return ordered_marker_names
 
 
-def convert_model_to_dictionary(
-    model: BaseModel | dict[str, Any] | list[Any] | Any,
-) -> Any:
-    if isinstance(model, BaseModel):
-        return {
-            key: convert_model_to_dictionary(value)
-            for key, value in model.model_dump().items()
-        }
-    if isinstance(model, Path):
-        return str(model)
-    if isinstance(model, RegionOfInterestBox):
-        return model.as_dictionary()
-    if isinstance(model, dict):
-        return {key: convert_model_to_dictionary(value) for key, value in model.items()}
-    if isinstance(model, list):
-        return [convert_model_to_dictionary(value) for value in model]
-    return model
-
-
 def load_configuration(path: str | Path) -> ApplicationConfiguration:
+    """Load and validate an application configuration from a YAML file."""
     configuration_path = Path(path)
     with configuration_path.open("r", encoding="utf-8") as file_handle:
         configuration_payload = yaml.safe_load(file_handle)
     try:
         configuration = ApplicationConfiguration.model_validate(configuration_payload)
-    except ValidationError as validation_error:
+    except pydantic.ValidationError as validation_error:
         raise ValueError(str(validation_error)) from validation_error
     marker_names = read_marker_names(configuration.input_paths.markers)
     return configuration.validate_marker_names(marker_names)
