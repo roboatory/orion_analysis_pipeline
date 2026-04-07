@@ -175,7 +175,7 @@ def run_segment(
 
     write_label_image(
         output_directory / "segmentation_mask.tif",
-        segmentation_result.kept_cell_labels,
+        segmentation_result.cell_labels,
     )
 
     histology_path = output_directory / "histology_patch.tif"
@@ -186,13 +186,13 @@ def run_segment(
     )
     save_segmentation_overlay_image(
         background_image,
-        segmentation_result.kept_cell_labels,
+        segmentation_result.cell_labels,
         output_directory / "segmentation_overlay.tif",
     )
 
     logger.info(
         "segmentation complete: %d cells",
-        int(segmentation_result.kept_cell_labels.max()),
+        int(segmentation_result.cell_labels.max()),
     )
 
 

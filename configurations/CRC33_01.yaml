@@ -28,11 +28,8 @@ preprocessing:
     upper_quantile: 0.995
 
 segmentation:
-  gaussian_sigma: 1.2
-  minimum_nucleus_area_pixels: 60
-  maximum_nucleus_area_pixels: 1500
-  peak_minimum_distance_pixels: 6
-  cell_expansion_distance_pixels: 6
+  cell_diameter_pixels: null
+  use_gpu: false
 
 normalization:
   arcsinh_cofactor: 150.0
@@ -43,19 +40,19 @@ normalization:
 
 annotation:
   cell_types:
-    - name: Tumor
+    - name: epithelial cell
       positive_markers: [Pan-CK]
-    - name: Endothelial
+    - name: endothelial cell
       positive_markers: [CD31]
-    - name: Stromal
+    - name: stromal cell
       positive_markers: [SMA]
-    - name: B_cell
+    - name: B cell
       positive_markers: [CD20]
-    - name: T_cell
+    - name: T cell
       positive_markers: [CD3e]
-    - name: Macrophage
+    - name: macrophage
       positive_markers: [CD68]
-    - name: Treg
+    - name: regulatory T cell
       positive_markers: [CD4, FOXP3]
 
 spatial_analysis:

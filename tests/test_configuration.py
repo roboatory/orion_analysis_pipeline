@@ -41,15 +41,11 @@ def base_configuration_dictionary(temporary_path: Path) -> dict[str, object]:
             "percentile_clip": {"lower_quantile": 0.005, "upper_quantile": 0.995},
         },
         "segmentation": {
-            "gaussian_sigma": 1.2,
-            "minimum_nucleus_area_pixels": 60,
-            "maximum_nucleus_area_pixels": 1500,
-            "peak_minimum_distance_pixels": 6,
-            "cell_expansion_distance_pixels": 6,
+            "cell_diameter_pixels": None,
+            "use_gpu": False,
         },
         "normalization": {
             "arcsinh_cofactor": 150.0,
-            "threshold_method": "otsu_with_fallback",
             "positive_fraction_minimum": 0.005,
             "positive_fraction_maximum": 0.70,
             "fallback_quantile": 0.90,
@@ -61,8 +57,6 @@ def base_configuration_dictionary(temporary_path: Path) -> dict[str, object]:
         },
         "spatial_analysis": {
             "nearest_neighbor_count": 10,
-            "minimum_cells_per_type_for_pairwise_analysis": 25,
-            "minimum_cells_per_type_for_clustering": 50,
             "permutation_count": 10,
             "neighborhood_cluster_count": 3,
         },

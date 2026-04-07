@@ -1,26 +1,17 @@
+from unittest.mock import MagicMock, patch
+
 import numpy as np
 
-from src.segmentation import (
-    find_labels_touching_boundary,
-    segment_cells_from_marker_images,
-)
+from src.segmentation import segment_cells_from_marker_images
 
 
 class DummySegmentationConfiguration:
-    gaussian_sigma = 1.2
-    minimum_nucleus_area_pixels = 10
-    maximum_nucleus_area_pixels = 800
-    peak_minimum_distance_pixels = 4
-    cell_expansion_distance_pixels = 4
-
-
-class DummyPercentileClipConfiguration:
-    lower_quantile = 0.005
-    upper_quantile = 0.995
+    cell_diameter_pixels = 30.0
+    use_gpu = False
 
 
 class DummyPreprocessingConfiguration:
-    percentile_clip = DummyPercentileClipConfiguration()
+    pass
 
 
 class DummyApplicationConfiguration:
@@ -28,47 +19,61 @@ class DummyApplicationConfiguration:
     preprocessing = DummyPreprocessingConfiguration()
 
 
-def test_watershed_splits_touching_nuclei() -> None:
-    nuclear_image = np.zeros((64, 64), dtype=np.float32)
-    cytoplasmic_image = np.zeros((64, 64), dtype=np.float32)
-    row_coordinates, column_coordinates = np.ogrid[:64, :64]
-    nuclear_image[
-        (row_coordinates - 24) ** 2 + (column_coordinates - 24) ** 2 < 100
-    ] = 1.0
-    nuclear_image[
-        (row_coordinates - 24) ** 2 + (column_coordinates - 38) ** 2 < 100
-    ] = 1.0
-    cytoplasmic_image[
-        (row_coordinates - 24) ** 2 + (column_coordinates - 24) ** 2 < 196
-    ] = 1.0
-    cytoplasmic_image[
-        (row_coordinates - 24) ** 2 + (column_coordinates - 38) ** 2 < 196
-    ] = 1.0
-    segmentation_result = segment_cells_from_marker_images(
-        nuclear_image,
-        cytoplasmic_image,
+@patch("src.segmentation.CellposeModel")
+def test_cellpose_returns_sequential_int32_labels(
+    mock_cellpose_class: MagicMock,
+) -> None:
+    mock_model = MagicMock()
+    mock_cellpose_class.return_value = mock_model
+    mock_labels = np.array(
+        [[0, 0, 5, 5], [0, 0, 5, 5], [3, 3, 0, 0], [3, 3, 0, 0]],
+        dtype=np.int32,
+    )
+    mock_model.eval.return_value = (mock_labels, None, None)
+
+    result = segment_cells_from_marker_images(
+        np.zeros((4, 4), dtype=np.float32),
+        np.zeros((4, 4), dtype=np.float32),
         DummyApplicationConfiguration(),
     )
-    assert segmentation_result.nuclei_labels.max() >= 2
+
+    assert result.cell_labels.dtype == np.int32
+    unique_labels = set(np.unique(result.cell_labels)) - {0}
+    assert unique_labels == {1, 2}
 
 
-def test_expanded_labels_do_not_overlap() -> None:
-    nuclear_image = np.zeros((64, 64), dtype=np.float32)
-    cytoplasmic_image = np.zeros((64, 64), dtype=np.float32)
-    nuclear_image[16:24, 16:24] = 1
-    nuclear_image[40:48, 40:48] = 1
-    cytoplasmic_image[12:28, 12:28] = 1
-    cytoplasmic_image[36:52, 36:52] = 1
-    segmentation_result = segment_cells_from_marker_images(
-        nuclear_image,
-        cytoplasmic_image,
+@patch("src.segmentation.CellposeModel")
+def test_cellpose_called_with_correct_channels(mock_cellpose_class: MagicMock) -> None:
+    mock_model = MagicMock()
+    mock_cellpose_class.return_value = mock_model
+    mock_model.eval.return_value = (np.zeros((4, 4), dtype=np.int32), None, None)
+
+    segment_cells_from_marker_images(
+        np.zeros((4, 4), dtype=np.float32),
+        np.zeros((4, 4), dtype=np.float32),
         DummyApplicationConfiguration(),
     )
-    assert np.all(segmentation_result.expanded_cell_labels >= 0)
+
+    mock_model.eval.assert_called_once()
+    call_kwargs = mock_model.eval.call_args
+    assert call_kwargs.kwargs["channels"] == [1, 2]
 
 
-def test_boundary_touching_labels_detected() -> None:
-    label_image = np.zeros((8, 8), dtype=np.int32)
-    label_image[0:3, 0:3] = 1
-    label_image[4:6, 4:6] = 2
-    assert find_labels_touching_boundary(label_image) == {1}
+@patch("src.segmentation.CellposeModel")
+def test_cellpose_receives_diameter_and_gpu(mock_cellpose_class: MagicMock) -> None:
+    mock_model = MagicMock()
+    mock_cellpose_class.return_value = mock_model
+    mock_model.eval.return_value = (np.zeros((4, 4), dtype=np.int32), None, None)
+
+    segment_cells_from_marker_images(
+        np.zeros((4, 4), dtype=np.float32),
+        np.zeros((4, 4), dtype=np.float32),
+        DummyApplicationConfiguration(),
+    )
+
+    mock_cellpose_class.assert_called_once_with(
+        model_type="cyto3",
+        gpu=False,
+    )
+    call_kwargs = mock_model.eval.call_args
+    assert call_kwargs.kwargs["diameter"] == 30.0
