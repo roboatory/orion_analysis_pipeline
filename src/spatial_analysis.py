@@ -20,8 +20,9 @@ class SpatialAnalysisResult:
 def compute_spatial_analysis(
     cell_annotations: pl.DataFrame,
     configuration: ApplicationConfiguration,
-    random_seed: int = 13,
+    random_seed: int,
 ) -> SpatialAnalysisResult:
+    """Run neighborhood, domain, and adjacency enrichment analyses on annotated cells."""
     if cell_annotations.is_empty():
         return SpatialAnalysisResult(cell_annotations, pl.DataFrame())
 
@@ -64,7 +65,9 @@ def compute_spatial_analysis(
         how="diagonal_relaxed",
     )
     if not spatial_metrics.is_empty():
-        spatial_metrics = spatial_metrics.sort(["metric_type", "group_a", "group_b"])
+        spatial_metrics = spatial_metrics.sort(
+            ["metric_type", "group_a", "group_b"],
+        )
     return SpatialAnalysisResult(
         cell_annotations_with_domains=cell_annotations_with_domains,
         spatial_metrics=spatial_metrics,
@@ -75,11 +78,18 @@ def build_symmetric_k_nearest_neighbor_graph(
     point_coordinates: np.ndarray,
     nearest_neighbor_count: int,
 ) -> np.ndarray:
+    """Build a symmetric k-NN edge list from 2D point coordinates."""
     if len(point_coordinates) == 0:
         return np.empty((0, 2), dtype=np.int32)
     kd_tree = cKDTree(point_coordinates)
-    query_neighbor_count = min(nearest_neighbor_count + 1, len(point_coordinates))
-    _, neighbor_indices = kd_tree.query(point_coordinates, k=query_neighbor_count)
+    query_neighbor_count = min(
+        nearest_neighbor_count + 1,
+        len(point_coordinates),
+    )
+    _, neighbor_indices = kd_tree.query(
+        point_coordinates,
+        k=query_neighbor_count,
+    )
     if neighbor_indices.ndim == 1:
         neighbor_indices = neighbor_indices[:, None]
     edge_set = set()
@@ -96,6 +106,7 @@ def build_cell_neighborhood_features(
     cell_annotations: pl.DataFrame,
     adjacency_edges: np.ndarray,
 ) -> pl.DataFrame:
+    """Compute per-cell neighbor type fraction features from the adjacency graph."""
     cell_types = cell_annotations["cell_type"].to_list()
     unique_cell_types = sorted(set(cell_types))
     neighbor_indices_by_cell: dict[int, list[int]] = {
@@ -128,6 +139,7 @@ def assign_spatial_domains(
     neighborhood_cluster_count: int,
     random_seed: int,
 ) -> pl.DataFrame:
+    """Cluster cells into spatial domains using k-means on neighborhood features."""
     if neighborhood_features.is_empty():
         return pl.DataFrame({"cell_identifier": [], "spatial_domain": []})
     feature_column_names = [
@@ -137,7 +149,8 @@ def assign_spatial_domains(
     ]
     feature_matrix = neighborhood_features.select(feature_column_names).to_numpy()
     effective_cluster_count = min(
-        neighborhood_cluster_count, len(neighborhood_features)
+        neighborhood_cluster_count,
+        len(neighborhood_features),
     )
     if effective_cluster_count <= 1:
         cluster_labels = np.zeros(len(neighborhood_features), dtype=int)
@@ -167,6 +180,7 @@ def relabel_cluster_identifiers(
     cluster_labels: np.ndarray,
     cluster_centers: np.ndarray,
 ) -> np.ndarray:
+    """Relabel cluster IDs by sorting on cluster center coordinates for deterministic ordering."""
     cluster_order = sorted(
         range(len(cluster_centers)),
         key=lambda cluster_index: tuple(cluster_centers[cluster_index].tolist()),
@@ -190,8 +204,12 @@ def summarize_adjoining_cell_type_pairs(
     permutation_count: int,
     random_seed: int,
 ) -> pl.DataFrame:
+    """Compute adjacency enrichment scores with permutation-based p-values for cell type pairs."""
     random_number_generator = np.random.default_rng(random_seed)
-    observed_pair_counts = count_cell_type_pairs(cell_types, adjacency_edges)
+    observed_pair_counts = count_cell_type_pairs(
+        cell_types,
+        adjacency_edges,
+    )
     permuted_counts_by_pair: dict[tuple[str, str], list[int]] = {
         pair: [] for pair in observed_pair_counts
     }
@@ -199,7 +217,8 @@ def summarize_adjoining_cell_type_pairs(
     for _ in range(permutation_count):
         shuffled_labels = random_number_generator.permutation(label_array)
         shuffled_pair_counts = count_cell_type_pairs(
-            list(shuffled_labels), adjacency_edges
+            list(shuffled_labels),
+            adjacency_edges,
         )
         for pair in observed_pair_counts:
             permuted_counts_by_pair[pair].append(shuffled_pair_counts.get(pair, 0))
@@ -233,6 +252,7 @@ def count_cell_type_pairs(
     cell_types: list[str],
     adjacency_edges: np.ndarray,
 ) -> Counter[tuple[str, str]]:
+    """Count adjacent cell type pairs from the edge list, with pairs sorted alphabetically."""
     pair_counts: Counter[tuple[str, str]] = Counter()
     for source_index, target_index in adjacency_edges:
         pair = tuple(
@@ -246,6 +266,7 @@ def summarize_spatial_domains(
     neighborhood_features: pl.DataFrame,
     domain_assignments: pl.DataFrame,
 ) -> pl.DataFrame:
+    """Compute mean neighbor type fractions per spatial domain."""
     if neighborhood_features.is_empty():
         return pl.DataFrame()
     merged_features = neighborhood_features.join(
@@ -291,6 +312,7 @@ def compute_empirical_p_value(
     observed_value: float,
     permuted_values: list[float],
 ) -> float:
+    """Calculate an empirical p-value as the fraction of permutations at or above the observed value."""
     if not permuted_values:
         return 1.0
     permuted_array = np.asarray(permuted_values, dtype=float)

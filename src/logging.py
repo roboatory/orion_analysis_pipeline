@@ -12,12 +12,18 @@ import yaml
 
 
 class _LoggerStream:
-    def __init__(self, logger: logging.Logger, level: int) -> None:
+    def __init__(
+        self,
+        logger: logging.Logger,
+        level: int,
+    ) -> None:
+        """Wrap a logger so writes to this stream are emitted as log records."""
         self._logger: logging.Logger = logger
         self._level: int = level
         self._buffer: str = ""
 
     def write(self, message: str) -> int:
+        """Buffer incoming text and log each complete line."""
         if not message:
             return 0
         self._buffer += message
@@ -28,12 +34,14 @@ class _LoggerStream:
         return len(message)
 
     def flush(self) -> None:
+        """Flush any remaining buffered text as a log record."""
         if self._buffer.strip():
             self._logger.log(self._level, self._buffer.rstrip())
         self._buffer = ""
 
 
 def resolve_log_path(configuration_path: Path) -> Path:
+    """Derive a timestamped log file path from the configuration's output directory."""
     output_directory = Path("outputs")
     if configuration_path.exists():
         with configuration_path.open("r", encoding="utf-8") as file_handle:
@@ -47,12 +55,17 @@ def resolve_log_path(configuration_path: Path) -> Path:
 
 @contextmanager
 def capture_runtime_logging(log_path: Path) -> Iterator[logging.Logger]:
+    """Redirect stdout, stderr, and warnings to a log file for the duration of the block."""
     log_path.parent.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger("pipeline.runtime")
     logger.setLevel(logging.INFO)
     logger.propagate = False
 
-    file_handler = logging.FileHandler(log_path, mode="w", encoding="utf-8")
+    file_handler = logging.FileHandler(
+        log_path,
+        mode="w",
+        encoding="utf-8",
+    )
     file_handler.setFormatter(
         logging.Formatter("%(asctime)s %(levelname)s %(message)s")
     )

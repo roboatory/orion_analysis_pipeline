@@ -5,7 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-uv run python3 main.py run --configuration <config.yaml> --mode patch   # run pipeline
+uv run python3 main.py --configuration <config.yaml> --mode patch                  # full pipeline
+uv run python3 main.py --configuration <config.yaml> --mode patch --stage segment  # single stage
 uv run pytest                                                            # all tests
 uv run pytest tests/test_segmentation.py                                 # single file
 uv run pytest tests/test_segmentation.py::test_function_name -v          # single test
@@ -14,9 +15,11 @@ uv run ruff format src/ tests/ main.py                                   # forma
 uv run pre-commit run --all-files                                        # all hooks
 ```
 
+Available `--stage` values: `select-roi`, `preprocess`, `segment`, `quantify`, `annotate`, `spatial`. Each stage reads its inputs from the output directory (written by previous stages) and writes its own outputs there. Omitting `--stage` executes all stages in order. `--mode` is required; `whole-slide` is reserved but not yet implemented.
+
 ## Architecture
 
-Orion is a **patch-first multiplex imaging pipeline** for single-image ORION-style multiplex immunofluorescence whole-slide analysis. It moves from preprocessing through segmentation, quantification, normalization, annotation, and spatial characterization to produce a fully annotated single-cell dataset with cell type-level spatial metrics. All spatial analyses operate on cell type labels and centroid coordinates, not pixel-level intensities. `main.py` is the CLI entry point; all domain logic lives under `src/`.
+This is a **multiplex imaging analysis pipeline** for patch-based ORION-style multiplex immunofluorescence. It processes OME-TIFF images through sequential preprocessing, segmentation, quantification, normalization, annotation, and spatial analysis to generate fully annotated single-cell datasets with cell type spatial metrics. Spatial analysis uses only cell type labels and centroids—not pixel intensities. `main.py` handles CLI argument parsing; pipeline control is in `src/pipeline.py`; domain logic resides in `src/`.
 
 ### Inputs and outputs
 
@@ -27,9 +30,24 @@ Orion is a **patch-first multiplex imaging pipeline** for single-image ORION-sty
 ### Pipeline stages (linear, deterministic)
 
 ```
-Configuration → Slide Metadata → ROI Selection → Preprocessing
-→ Segmentation → Quantification → Annotation → Spatial Analysis → Output
+Configuration → ROI Selection → Preprocessing → Segmentation → Quantification → Annotation → Spatial Analysis
 ```
+
+Each stage in `pipeline.py` is a self-contained function that reads inputs from disk and writes outputs to the sample output directory. The full pipeline calls them in sequence. Intermediate outputs allow stages to be re-run individually.
+
+1. **Configuration** (`configuration.py` → `load_configuration()`): Reads a YAML file into validated Pydantic models. Checks that input files exist, marker names match the TIFF channel count, and annotation rules reference valid markers.
+
+2. **ROI Selection** (`region_of_interest.py` → `choose_region_of_interest()`): This stage randomly samples candidate patches, scores each one on tissue coverage and signal quality, and picks the best patch as the region of interest for all downstream work.
+
+3. **Preprocessing** (`preprocessing.py` → `preprocess_region_of_interest_patch()`): Multiplex images contain autofluorescence — background glow that contaminates every channel. This stage estimates how much of the autofluorescence channel leaks into each biological channel (via least-squares scaling) and subtracts it, producing a corrected image stack.
+
+4. **Segmentation** (`segmentation.py` → `segment_cells_from_marker_images()`): Finds individual cells in the image. Nuclei are detected by thresholding the nuclear marker and splitting touching nuclei with watershed. Each nucleus is then expanded outward into a cell body using the cytoplasmic marker as a guide. Cells touching the patch boundary are discarded.
+
+5. **Quantification** (`quantification.py` → `quantify_cells_in_region_of_interest()`): With cell boundaries defined, this stage measures each cell: its centroid coordinates, area, shape (eccentricity, solidity), and the mean intensity of every marker channel within its mask. The result is a single row per cell in a feature table.
+
+6. **Annotation** (`annotation.py` → `annotate_cells()`): Converts raw marker intensities into cell type labels. Each marker is arcsinh-normalized, then split into positive/negative using an Otsu threshold (with a quantile fallback). Cells are assigned a type based on which markers they are positive for, following boolean rules defined in the configuration.
+
+7. **Spatial Analysis** (`spatial_analysis.py` → `compute_spatial_analysis()`): Characterizes how cell types are arranged relative to each other. Builds a k-nearest-neighbor graph from cell centroids, computes neighborhood composition features, clusters cells into spatial domains via k-means, and tests whether cell type pairs are spatially enriched or depleted using permutation-based statistics.
 
 | Stage | Module | Entry function |
 |---|---|---|
@@ -42,8 +60,8 @@ Configuration → Slide Metadata → ROI Selection → Preprocessing
 | Marker thresholding & cell typing | `annotation.py` | `annotate_cells()` |
 | k-NN neighborhoods, domains, adjacency | `spatial_analysis.py` | `compute_spatial_analysis()` |
 | All file writing & visualization | `io.py` | various `write_*` / `save_*` functions |
-
-`runtime_logging.py` wraps the pipeline run to capture stdout/stderr and Python warnings into a timestamped log file.
+| Pipeline orchestration | `pipeline.py` | `run_patch_pipeline()` / `run_<stage>()` |
+| Logging capture | `logging.py` | `capture_runtime_logging()` |
 
 ### Configuration
 
@@ -65,18 +83,30 @@ Frozen dataclasses in `data_models.py`: `RegionOfInterestBox`, `SlideMetadata`, 
 
 ### Output structure
 
+<details>
+<summary><strong>Output Directory Structure</strong></summary>
+
 ```
 output_directory/<sample_identifier>/
-    corrected_patch.tif, segmentation_mask.tif, segmentation_overlay.tif,
-    cell_features.csv, cell_annotations.csv, spatial_metrics.csv,
-    preprocessing_comparison.png, cell_type_map.png, spatial_domain_map.png,
-    configuration_snapshot.yaml
+├── raw_patch.tif
+├── roi_metadata.yaml
+├── histology_patch.tif
+├── corrected_patch.tif
+├── preprocessing_comparison.png
+├── segmentation_mask.tif
+├── segmentation_overlay.tif
+├── cell_features.csv
+├── cell_annotations.csv
+├── cell_type_map.png
+├── spatial_metrics.csv
+├── spatial_domain_map.png
+└── configuration_snapshot.yaml
 ```
+
+</details>
 
 ## Testing
 
 - One test file per module (`tests/test_<module>.py`)
 - Unit tests use dummy config objects and synthetic images (circles, rectangles)
-- Real-data tests gate on file existence with `@pytest.mark.skipif`; reference data lives under `data/`
 - `tests/conftest.py` adds repo root to `sys.path`
-- Integration test in `test_main.py` runs the full pipeline and checks all expected outputs exist

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import numpy as np
 import polars as pl
 from skimage.filters import threshold_otsu
@@ -9,16 +7,15 @@ from skimage.filters import threshold_otsu
 from src.configuration import ApplicationConfiguration
 
 
-@dataclass(frozen=True)
-class AnnotationResult:
-    cell_annotations: pl.DataFrame
-
-
 def annotate_cells(
     cell_features: pl.DataFrame,
     configuration: ApplicationConfiguration,
-) -> AnnotationResult:
-    validate_annotation_marker_columns(cell_features, configuration)
+) -> pl.DataFrame:
+    """Assign cell type labels using arcsinh-normalized marker thresholds and boolean rules."""
+    validate_annotation_marker_columns(
+        cell_features,
+        configuration,
+    )
     annotation_marker_names = configuration.annotation_marker_names
     annotated_cell_measurements = cell_features.clone()
 
@@ -33,7 +30,10 @@ def annotate_cells(
         normalized_values = annotated_cell_measurements[
             normalized_column_name
         ].to_numpy()
-        threshold_value = compute_marker_threshold(normalized_values, configuration)
+        threshold_value = compute_marker_threshold(
+            normalized_values,
+            configuration,
+        )
         annotated_cell_measurements = annotated_cell_measurements.with_columns(
             (pl.col(normalized_column_name) >= threshold_value).alias(
                 threshold_column_name
@@ -71,13 +71,14 @@ def annotate_cells(
                 thresholded_row[f"{marker_name}_high"]
             )
         annotation_rows.append(annotation_row)
-    return AnnotationResult(pl.DataFrame(annotation_rows))
+    return pl.DataFrame(annotation_rows)
 
 
 def validate_annotation_marker_columns(
     cell_features: pl.DataFrame,
     configuration: ApplicationConfiguration,
 ) -> None:
+    """Raise if any annotation marker is missing from the cell features columns."""
     available_columns = set(cell_features.columns)
     missing_marker_names = [
         marker_name
@@ -96,6 +97,7 @@ def compute_marker_threshold(
     normalized_values: np.ndarray,
     configuration: ApplicationConfiguration,
 ) -> float:
+    """Determine a positive/negative threshold using Otsu with a quantile fallback."""
     if len(normalized_values) == 0:
         return 0.0
     if np.allclose(normalized_values, normalized_values[0]):

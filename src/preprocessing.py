@@ -18,8 +18,10 @@ def preprocess_region_of_interest_patch(
     raw_image_stack: np.ndarray,
     marker_names: list[str],
     configuration: ApplicationConfiguration,
-    random_seed: int = 7,
+    random_seed: int,
 ) -> PreprocessingResult:
+    """Subtract per-channel autofluorescence from the raw image stack via least-squares scaling."""
+    original_dtype = raw_image_stack.dtype
     marker_name_to_index = build_marker_name_to_index(marker_names)
     autofluorescence_index = marker_name_to_index[
         configuration.channels.autofluorescence_marker
@@ -32,7 +34,7 @@ def preprocess_region_of_interest_patch(
 
     if not configuration.preprocessing.autofluorescence_subtraction.enabled:
         return PreprocessingResult(
-            corrected_image_stack=corrected_image_stack,
+            corrected_image_stack=corrected_image_stack.astype(original_dtype),
             autofluorescence_scale_by_marker=autofluorescence_scale_by_marker,
         )
 
@@ -54,7 +56,10 @@ def preprocess_region_of_interest_patch(
         sampled_pixel_indices
     ]
     autofluorescence_denominator = float(
-        np.dot(sampled_autofluorescence_values, sampled_autofluorescence_values)
+        np.dot(
+            sampled_autofluorescence_values,
+            sampled_autofluorescence_values,
+        )
     )
 
     for marker_name, marker_index in marker_name_to_index.items():
@@ -71,7 +76,10 @@ def preprocess_region_of_interest_patch(
             autofluorescence_scale = 0.0
         else:
             autofluorescence_scale = float(
-                np.dot(sampled_channel_values, sampled_autofluorescence_values)
+                np.dot(
+                    sampled_channel_values,
+                    sampled_autofluorescence_values,
+                )
                 / autofluorescence_denominator
             )
         corrected_image_stack[marker_index] = np.maximum(
@@ -81,11 +89,15 @@ def preprocess_region_of_interest_patch(
         autofluorescence_scale_by_marker[marker_name] = autofluorescence_scale
 
     return PreprocessingResult(
-        corrected_image_stack=corrected_image_stack,
+        corrected_image_stack=corrected_image_stack.astype(original_dtype),
         autofluorescence_scale_by_marker=autofluorescence_scale_by_marker,
     )
 
 
-def clip_upper_intensity(image: np.ndarray, upper_quantile: float) -> np.ndarray:
+def clip_upper_intensity(
+    image: np.ndarray,
+    upper_quantile: float,
+) -> np.ndarray:
+    """Clip pixel values above the given quantile to reduce outlier influence."""
     upper_intensity = float(np.quantile(image, upper_quantile))
     return np.clip(image, None, upper_intensity)

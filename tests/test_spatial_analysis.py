@@ -8,8 +8,6 @@ from src.spatial_analysis import (
 
 class DummySpatialAnalysisConfiguration:
     nearest_neighbor_count = 2
-    minimum_cells_per_type_for_pairwise_analysis = 1
-    minimum_cells_per_type_for_clustering = 1
     permutation_count = 5
     neighborhood_cluster_count = 2
 

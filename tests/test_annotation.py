@@ -42,7 +42,6 @@ def build_configuration(
             },
             "normalization": {
                 "arcsinh_cofactor": 150.0,
-                "threshold_method": "otsu_with_fallback",
                 "positive_fraction_minimum": 0.005,
                 "positive_fraction_maximum": 0.70,
                 "fallback_quantile": 0.90,
@@ -50,8 +49,6 @@ def build_configuration(
             "annotation": {"cell_types": cell_types},
             "spatial_analysis": {
                 "nearest_neighbor_count": 2,
-                "minimum_cells_per_type_for_pairwise_analysis": 1,
-                "minimum_cells_per_type_for_clustering": 1,
                 "permutation_count": 5,
                 "neighborhood_cluster_count": 2,
             },
@@ -75,18 +72,18 @@ def test_single_marker_match_assigns_configured_cell_type() -> None:
     configuration = build_configuration(
         [{"name": "B_cell", "positive_markers": ["CD20"]}]
     )
-    annotation_result = annotate_cells(
+    cell_annotations = annotate_cells(
         build_cell_features(CD20=1000.0),
         configuration,
     )
-    assert annotation_result.cell_annotations[0, "cell_type"] == "B_cell"
+    assert cell_annotations[0, "cell_type"] == "B_cell"
 
 
 def test_multi_marker_rule_requires_all_positive_markers() -> None:
     configuration = build_configuration(
         [{"name": "Treg", "positive_markers": ["CD4", "FOXP3"]}]
     )
-    annotation_result = annotate_cells(
+    cell_annotations = annotate_cells(
         pl.DataFrame(
             [
                 {
@@ -111,7 +108,7 @@ def test_multi_marker_rule_requires_all_positive_markers() -> None:
         ),
         configuration,
     )
-    assert annotation_result.cell_annotations[0, "cell_type"] == "Other"
+    assert cell_annotations[0, "cell_type"] == "Other"
 
 
 def test_multiple_matches_collapse_to_other() -> None:
@@ -121,11 +118,11 @@ def test_multiple_matches_collapse_to_other() -> None:
             {"name": "Plasma_like", "positive_markers": ["CD20"]},
         ]
     )
-    annotation_result = annotate_cells(
+    cell_annotations = annotate_cells(
         build_cell_features(CD20=1000.0),
         configuration,
     )
-    assert annotation_result.cell_annotations[0, "cell_type"] == "Other"
+    assert cell_annotations[0, "cell_type"] == "Other"
 
 
 def test_missing_marker_column_fails_fast() -> None:

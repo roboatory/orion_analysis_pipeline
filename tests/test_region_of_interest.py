@@ -1,3 +1,5 @@
+from dataclasses import asdict
+
 import numpy as np
 
 from src.data_models import RegionOfInterestBox, SlideMetadata
@@ -36,10 +38,8 @@ def build_slide_metadata(
         histology_path=None,
         width_pixels=width_pixels,
         height_pixels=height_pixels,
-        channel_count=4,
         pixel_size_x_micrometers=1.0,
         pixel_size_y_micrometers=1.0,
-        open_microscopy_environment_channel_names=[],
         marker_names=["Hoechst", "AF1", "Pan-CK", "CD45"],
     )
 
@@ -201,9 +201,9 @@ def test_quality_score_prefers_tissue_and_informative_signal() -> None:
     assert informative_score["quality_score"] > blank_score["quality_score"]
 
 
-def test_region_of_interest_box_dictionary() -> None:
+def test_region_of_interest_box_as_dict() -> None:
     region_of_interest = RegionOfInterestBox(1, 2, 3, 4)
-    assert region_of_interest.as_dictionary() == {
+    assert asdict(region_of_interest) == {
         "x_pixels": 1,
         "y_pixels": 2,
         "width_pixels": 3,
