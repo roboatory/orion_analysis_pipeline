@@ -7,7 +7,6 @@ from scipy import ndimage as scipy_ndimage
 from skimage import feature, filters, measure, morphology, segmentation
 
 from src.configuration import ApplicationConfiguration
-from src.data_models import SegmentationValidationSummary
 from src.io import percentile_normalize_image
 
 
@@ -198,74 +197,3 @@ def find_labels_touching_boundary(labels: np.ndarray) -> set[int]:
 def relabel_sequentially(labels: np.ndarray) -> np.ndarray:
     relabeled_labels, _, _ = segmentation.relabel_sequential(labels)
     return relabeled_labels.astype(np.int32)
-
-
-def summarize_segmentation_validation(
-    existing_labels: np.ndarray | None,
-    new_labels: np.ndarray,
-) -> SegmentationValidationSummary | None:
-    if existing_labels is None:
-        return None
-    relabeled_existing_labels = relabel_sequentially(existing_labels.astype(np.int32))
-    relabeled_new_labels = relabel_sequentially(new_labels.astype(np.int32))
-    existing_region_properties = measure.regionprops(relabeled_existing_labels)
-    new_region_properties = measure.regionprops(relabeled_new_labels)
-    existing_areas = np.array(
-        [region_properties.area for region_properties in existing_region_properties],
-        dtype=float,
-    )
-    new_areas = np.array(
-        [region_properties.area for region_properties in new_region_properties],
-        dtype=float,
-    )
-    centroid_density_overlap = compute_centroid_density_overlap(
-        existing_region_properties,
-        new_region_properties,
-        relabeled_existing_labels.shape,
-    )
-    return SegmentationValidationSummary(
-        existing_cell_count=int(relabeled_existing_labels.max()),
-        new_cell_count=int(relabeled_new_labels.max()),
-        existing_median_area_square_pixels=float(np.median(existing_areas))
-        if existing_areas.size
-        else 0.0,
-        new_median_area_square_pixels=float(np.median(new_areas))
-        if new_areas.size
-        else 0.0,
-        centroid_density_overlap=centroid_density_overlap,
-    )
-
-
-def compute_centroid_density_overlap(
-    existing_region_properties: list[measure._regionprops.RegionProperties],
-    new_region_properties: list[measure._regionprops.RegionProperties],
-    image_shape: tuple[int, int],
-) -> float:
-    y_bin_count = max(image_shape[0] // 128, 2)
-    x_bin_count = max(image_shape[1] // 128, 2)
-    existing_points = np.array(
-        [
-            region_properties.centroid
-            for region_properties in existing_region_properties
-        ],
-        dtype=float,
-    )
-    new_points = np.array(
-        [region_properties.centroid for region_properties in new_region_properties],
-        dtype=float,
-    )
-    if len(existing_points) == 0 or len(new_points) == 0:
-        return 0.0
-    existing_histogram, _, _ = np.histogram2d(
-        existing_points[:, 0],
-        existing_points[:, 1],
-        bins=(y_bin_count, x_bin_count),
-    )
-    new_histogram, _, _ = np.histogram2d(
-        new_points[:, 0],
-        new_points[:, 1],
-        bins=(y_bin_count, x_bin_count),
-    )
-    if np.std(existing_histogram) == 0 or np.std(new_histogram) == 0:
-        return 0.0
-    return float(np.corrcoef(existing_histogram.ravel(), new_histogram.ravel())[0, 1])
