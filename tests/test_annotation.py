@@ -102,21 +102,153 @@ def test_multi_marker_rule_requires_all_positive_markers() -> None:
         ),
         configuration,
     )
-    assert cell_annotations[0, "cell_type"] == "Other"
+    assert cell_annotations[0, "cell_type"] == "unassigned"
 
 
-def test_multiple_matches_collapse_to_other() -> None:
+def test_first_matching_rule_wins() -> None:
     configuration = build_configuration(
         [
-            {"name": "B_cell", "positive_markers": ["CD20"]},
-            {"name": "Plasma_like", "positive_markers": ["CD20"]},
+            {"name": "Treg", "positive_markers": ["CD3e", "CD4", "FOXP3"]},
+            {"name": "T_cell", "positive_markers": ["CD3e"]},
         ]
     )
     cell_annotations = annotate_cells(
-        build_cell_features(CD20=1000.0),
+        build_cell_features(CD3e=1000.0, CD4=1000.0, FOXP3=1000.0),
         configuration,
     )
-    assert cell_annotations[0, "cell_type"] == "Other"
+    assert cell_annotations[0, "cell_type"] == "Treg"
+
+
+def test_parent_rule_matches_when_subtype_does_not() -> None:
+    configuration = build_configuration(
+        [
+            {"name": "Treg", "positive_markers": ["CD3e", "CD4", "FOXP3"]},
+            {"name": "T_cell", "positive_markers": ["CD3e"]},
+        ]
+    )
+    cell_annotations = annotate_cells(
+        pl.DataFrame(
+            [
+                {
+                    "cell_identifier": 1,
+                    "x_micrometers": 1.0,
+                    "y_micrometers": 2.0,
+                    "CD3e": 1000.0,
+                    "CD4": 0.0,
+                    "FOXP3": 0.0,
+                },
+                {
+                    "cell_identifier": 2,
+                    "x_micrometers": 3.0,
+                    "y_micrometers": 4.0,
+                    "CD3e": 1000.0,
+                    "CD4": 1000.0,
+                    "FOXP3": 1000.0,
+                },
+            ]
+        ),
+        configuration,
+    )
+    assert cell_annotations[0, "cell_type"] == "T_cell"
+    assert cell_annotations[1, "cell_type"] == "Treg"
+
+
+def test_negative_markers_exclude_cell() -> None:
+    configuration = build_configuration(
+        [
+            {
+                "name": "helper_T",
+                "positive_markers": ["CD3e", "CD4"],
+                "negative_markers": ["FOXP3"],
+            },
+        ]
+    )
+    cell_annotations = annotate_cells(
+        build_cell_features(CD3e=1000.0, CD4=1000.0, FOXP3=1000.0),
+        configuration,
+    )
+    assert cell_annotations[0, "cell_type"] == "unassigned"
+
+
+def test_negative_marker_low_allows_match() -> None:
+    configuration = build_configuration(
+        [
+            {
+                "name": "helper_T",
+                "positive_markers": ["CD3e", "CD4"],
+                "negative_markers": ["FOXP3"],
+            },
+        ]
+    )
+    cell_annotations = annotate_cells(
+        pl.DataFrame(
+            [
+                {
+                    "cell_identifier": 1,
+                    "x_micrometers": 1.0,
+                    "y_micrometers": 2.0,
+                    "CD3e": 1000.0,
+                    "CD4": 1000.0,
+                    "FOXP3": 0.0,
+                },
+                {
+                    "cell_identifier": 2,
+                    "x_micrometers": 3.0,
+                    "y_micrometers": 4.0,
+                    "CD3e": 1000.0,
+                    "CD4": 1000.0,
+                    "FOXP3": 1000.0,
+                },
+            ]
+        ),
+        configuration,
+    )
+    assert cell_annotations[0, "cell_type"] == "helper_T"
+    assert cell_annotations[1, "cell_type"] == "unassigned"
+
+
+def test_no_rule_match_labels_unassigned() -> None:
+    configuration = build_configuration(
+        [{"name": "B_cell", "positive_markers": ["CD20"]}]
+    )
+    cell_annotations = annotate_cells(
+        pl.DataFrame(
+            [
+                {
+                    "cell_identifier": 1,
+                    "x_micrometers": 1.0,
+                    "y_micrometers": 2.0,
+                    "CD20": 0.0,
+                },
+                {
+                    "cell_identifier": 2,
+                    "x_micrometers": 3.0,
+                    "y_micrometers": 4.0,
+                    "CD20": 1000.0,
+                },
+            ]
+        ),
+        configuration,
+    )
+    assert cell_annotations[0, "cell_type"] == "unassigned"
+    assert cell_annotations[1, "cell_type"] == "B_cell"
+
+
+def test_high_flags_include_negative_markers() -> None:
+    configuration = build_configuration(
+        [
+            {
+                "name": "helper_T",
+                "positive_markers": ["CD3e"],
+                "negative_markers": ["FOXP3"],
+            },
+        ]
+    )
+    cell_annotations = annotate_cells(
+        build_cell_features(CD3e=1000.0, FOXP3=0.0),
+        configuration,
+    )
+    assert "FOXP3_high" in cell_annotations.columns
 
 
 def test_missing_marker_column_fails_fast() -> None:
