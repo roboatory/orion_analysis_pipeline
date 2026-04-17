@@ -63,8 +63,7 @@ annotation:
       positive_markers: [SMA]
 
 spatial_analysis:
-  nearest_neighbor_count: 10
-  minimum_cells_per_type_for_pairwise_analysis: 25
-  minimum_cells_per_type_for_clustering: 50
-  permutation_count: 100
-  neighborhood_cluster_count: 6
+  neighborhood_radius_micrometers: 50.0
+  minimum_cells_per_type_for_pairwise_analysis: 30
+  permutation_count: 1000
+  neighborhood_cluster_count: 8

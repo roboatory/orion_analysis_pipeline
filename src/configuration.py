@@ -59,7 +59,8 @@ class NormalizationConfiguration(BaseModel):
 
 
 class SpatialAnalysisConfiguration(BaseModel):
-    nearest_neighbor_count: int = 10
+    neighborhood_radius_micrometers: float = 50.0
+    minimum_cells_per_type_for_pairwise_analysis: int = 30
     permutation_count: int = 100
     neighborhood_cluster_count: int = 6
 
