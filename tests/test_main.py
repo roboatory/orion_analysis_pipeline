@@ -1,7 +1,8 @@
 import pytest
 from pathlib import Path
 
-from main import STAGES, build_argument_parser, main
+from main import build_argument_parser, main
+from src.constants import STAGES
 
 LOG_DIRECTORY = Path("/Users/rohit/Desktop/orion/outputs/logs")
 

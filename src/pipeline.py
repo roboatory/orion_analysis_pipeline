@@ -12,6 +12,7 @@ import yaml
 
 from src.annotation import annotate_cells
 from src.configuration import ApplicationConfiguration
+from src.constants import STAGES
 from src.data_models import RegionOfInterestBox
 from src.io import (
     build_marker_name_to_index,
@@ -32,15 +33,6 @@ from src.quantification import quantify_cells_in_region_of_interest
 from src.region_of_interest import choose_region_of_interest
 from src.segmentation import segment_cells_from_marker_images
 from src.spatial_analysis import compute_spatial_analysis
-
-STAGES = [
-    "select-roi",
-    "preprocess",
-    "segment",
-    "quantify",
-    "annotate",
-    "spatial",
-]
 
 
 def run_patch_pipeline(

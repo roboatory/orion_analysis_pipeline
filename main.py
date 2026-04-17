@@ -4,22 +4,9 @@ import argparse
 from pathlib import Path
 
 from src.configuration import load_configuration
-from src.pipeline import run_patch_pipeline
+from src.constants import MODES, STAGES
 from src.logging import capture_runtime_logging, resolve_log_path
-
-STAGES = [
-    "select-roi",
-    "preprocess",
-    "segment",
-    "quantify",
-    "annotate",
-    "spatial",
-]
-
-MODES = [
-    "patch",
-    "whole-slide",
-]
+from src.pipeline import run_patch_pipeline
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -29,7 +16,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
         description="Orion multiplexed imaging analysis pipeline."
     )
     argument_parser.add_argument("--configuration", required=True)
-    argument_parser.add_argument("--mode", choices=MODES, default="patch")
+    argument_parser.add_argument("--mode", choices=MODES, required=True)
     argument_parser.add_argument("--stage", choices=STAGES, default=None)
     # fmt: on
 
