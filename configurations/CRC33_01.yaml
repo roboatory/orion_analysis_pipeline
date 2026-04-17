@@ -40,20 +40,27 @@ normalization:
 
 annotation:
   cell_types:
+    - name: regulatory T cell
+      positive_markers: [CD3e, CD4, FOXP3]
+    - name: helper T cell
+      positive_markers: [CD3e, CD4]
+      negative_markers: [FOXP3]
+    - name: cytotoxic T cell
+      positive_markers: [CD3e, CD8a]
+    - name: T cell
+      positive_markers: [CD3e]
+    - name: M2 macrophage
+      positive_markers: [CD68, CD163]
+    - name: macrophage
+      positive_markers: [CD68]
+    - name: B cell
+      positive_markers: [CD20]
     - name: epithelial cell
       positive_markers: [Pan-CK]
     - name: endothelial cell
       positive_markers: [CD31]
     - name: stromal cell
       positive_markers: [SMA]
-    - name: B cell
-      positive_markers: [CD20]
-    - name: T cell
-      positive_markers: [CD3e]
-    - name: macrophage
-      positive_markers: [CD68]
-    - name: regulatory T cell
-      positive_markers: [CD4, FOXP3]
 
 spatial_analysis:
   nearest_neighbor_count: 10

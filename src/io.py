@@ -256,27 +256,6 @@ def save_cell_assignment_map(
         s=6,
         alpha=0.8,
     )
-    for label in unique_labels:
-        label_rows = cell_annotations.filter(pl.col(label_column_name) == label)
-        if label_rows.is_empty():
-            continue
-        x_position = float(np.median(label_rows["x_micrometers"].to_numpy()))
-        y_position = float(np.median(label_rows["y_micrometers"].to_numpy()))
-        axis.text(
-            x_position,
-            y_position,
-            str(label),
-            fontsize=8,
-            ha="center",
-            va="center",
-            color="black",
-            bbox={
-                "facecolor": "white",
-                "alpha": 0.75,
-                "edgecolor": "none",
-                "pad": 1.5,
-            },
-        )
     axis.set_title(title)
     axis.set_xlabel("x (μm)")
     axis.set_ylabel("y (μm)")

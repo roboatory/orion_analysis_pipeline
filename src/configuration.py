@@ -67,6 +67,7 @@ class SpatialAnalysisConfiguration(BaseModel):
 class CellTypeAnnotationRuleConfiguration(BaseModel):
     name: str
     positive_markers: list[str] = Field(min_length=1)
+    negative_markers: list[str] = Field(default_factory=list)
 
 
 class AnnotationConfiguration(BaseModel):
@@ -166,7 +167,9 @@ class ApplicationConfiguration(BaseModel):
         seen_marker_names: set[str] = set()
         ordered_marker_names: list[str] = []
         for cell_type_rule in self.annotation.cell_types:
-            for marker_name in cell_type_rule.positive_markers:
+            for marker_name in (
+                cell_type_rule.positive_markers + cell_type_rule.negative_markers
+            ):
                 if marker_name not in seen_marker_names:
                     ordered_marker_names.append(marker_name)
                     seen_marker_names.add(marker_name)

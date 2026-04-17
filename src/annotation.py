@@ -42,22 +42,21 @@ def annotate_cells(
 
     thresholded_rows = annotated_cell_measurements.to_dicts()
     annotation_rows: list[dict[str, object]] = []
-    marker_names_by_cell_type = {
-        cell_type_rule.name: list(cell_type_rule.positive_markers)
-        for cell_type_rule in configuration.annotation.cell_types
-    }
+    cell_type_rules = configuration.annotation.cell_types
     for thresholded_row in thresholded_rows:
-        matched_cell_type_names = [
-            cell_type_name
-            for cell_type_name, marker_names in marker_names_by_cell_type.items()
-            if all(
+        cell_type = "unassigned"
+        for rule in cell_type_rules:
+            positives_match = all(
                 bool(thresholded_row[f"{marker_name}_high"])
-                for marker_name in marker_names
+                for marker_name in rule.positive_markers
             )
-        ]
-        cell_type = (
-            matched_cell_type_names[0] if len(matched_cell_type_names) == 1 else "Other"
-        )
+            negatives_match = all(
+                not bool(thresholded_row[f"{marker_name}_high"])
+                for marker_name in rule.negative_markers
+            )
+            if positives_match and negatives_match:
+                cell_type = rule.name
+                break
         annotation_row = {
             "cell_identifier": thresholded_row["cell_identifier"],
             "x_micrometers": thresholded_row["x_micrometers"],
