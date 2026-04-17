@@ -5,6 +5,7 @@ import zlib
 from dataclasses import asdict
 from pathlib import Path
 
+import numpy as np
 import polars as pl
 import tifffile
 import yaml
@@ -23,7 +24,7 @@ from src.io import (
     save_segmentation_overlay_image,
     write_csv,
     write_image_stack,
-    write_label_image,
+    write_label_array,
     write_yaml_file,
 )
 from src.preprocessing import preprocess_region_of_interest_patch
@@ -173,8 +174,8 @@ def run_segment(
         configuration,
     )
 
-    write_label_image(
-        output_directory / "segmentation_mask.tif",
+    write_label_array(
+        output_directory / "segmentation_mask.npy",
         segmentation_result.cell_labels,
     )
 
@@ -208,7 +209,7 @@ def run_quantify(
 
     corrected_patch = tifffile.imread(output_directory / "corrected_patch.tif")
     raw_patch = tifffile.imread(output_directory / "raw_patch.tif")
-    label_image = tifffile.imread(output_directory / "segmentation_mask.tif")
+    label_image = np.load(output_directory / "segmentation_mask.npy")
 
     region_of_interest = RegionOfInterestBox(
         x_pixels=roi_metadata["x_pixels"],

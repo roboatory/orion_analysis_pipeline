@@ -43,7 +43,7 @@ def test_cellpose_returns_sequential_int32_labels(
 
 
 @patch("src.segmentation.CellposeModel")
-def test_cellpose_called_with_correct_channels(mock_cellpose_class: MagicMock) -> None:
+def test_cellpose_called_without_channels(mock_cellpose_class: MagicMock) -> None:
     mock_model = MagicMock()
     mock_cellpose_class.return_value = mock_model
     mock_model.eval.return_value = (np.zeros((4, 4), dtype=np.int32), None, None)
@@ -56,7 +56,7 @@ def test_cellpose_called_with_correct_channels(mock_cellpose_class: MagicMock) -
 
     mock_model.eval.assert_called_once()
     call_kwargs = mock_model.eval.call_args
-    assert call_kwargs.kwargs["channels"] == [1, 2]
+    assert "channels" not in call_kwargs.kwargs
 
 
 @patch("src.segmentation.CellposeModel")
@@ -72,7 +72,7 @@ def test_cellpose_receives_diameter_and_gpu(mock_cellpose_class: MagicMock) -> N
     )
 
     mock_cellpose_class.assert_called_once_with(
-        model_type="cyto3",
+        pretrained_model="cpsam",
         gpu=False,
     )
     call_kwargs = mock_model.eval.call_args

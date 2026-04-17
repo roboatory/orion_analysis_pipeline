@@ -19,9 +19,9 @@ def segment_cells_from_marker_images(
     cytoplasmic_image: np.ndarray,
     configuration: ApplicationConfiguration,
 ) -> SegmentationResult:
-    """Segment cells using Cellpose cyto3 with nuclear and cytoplasmic channels."""
+    """Segment cells using Cellpose-SAM with nuclear and cytoplasmic channels."""
     model = CellposeModel(
-        model_type="cyto3",
+        pretrained_model="cpsam",
         gpu=configuration.segmentation.use_gpu,
     )
     image_stack = np.stack(
@@ -31,7 +31,6 @@ def segment_cells_from_marker_images(
     labels, _, _ = model.eval(
         image_stack,
         diameter=configuration.segmentation.cell_diameter_pixels,
-        channels=[1, 2],
     )
     labels = relabel_sequentially(labels)
     return SegmentationResult(cell_labels=labels)

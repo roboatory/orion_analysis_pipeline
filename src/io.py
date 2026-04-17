@@ -182,13 +182,13 @@ def write_image_stack(
     return path
 
 
-def write_label_image(
+def write_label_array(
     path: Path,
     label_image: Any,
 ) -> Path:
-    """Write a single-channel segmentation label image to a TIFF."""
+    """Write a segmentation label array to a NumPy .npy file."""
     ensure_directory(path.parent)
-    tifffile.imwrite(path, label_image)
+    np.save(path, label_image)
     return path
 
 

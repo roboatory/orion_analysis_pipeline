@@ -41,7 +41,7 @@ Each stage in `pipeline.py` is a self-contained function that reads inputs from 
 
 3. **Preprocessing** (`preprocessing.py` → `preprocess_region_of_interest_patch()`): Multiplex images contain autofluorescence — background glow that contaminates every channel. This stage estimates how much of the autofluorescence channel leaks into each biological channel (via least-squares scaling) and subtracts it, producing a corrected image stack.
 
-4. **Segmentation** (`segmentation.py` → `segment_cells_from_marker_images()`): Finds individual cells in the image. Nuclei are detected by thresholding the nuclear marker and splitting touching nuclei with watershed. Each nucleus is then expanded outward into a cell body using the cytoplasmic marker as a guide. Cells touching the patch boundary are discarded.
+4. **Segmentation** (`segmentation.py` → `segment_cells_from_marker_images()`): Finds individual cells in the image using Cellpose-SAM (cpsam), a SAM-based transformer model. The nuclear and cytoplasmic marker channels are stacked and passed to the model, which produces instance segmentation masks. Labels are relabeled sequentially after inference.
 
 5. **Quantification** (`quantification.py` → `quantify_cells_in_region_of_interest()`): With cell boundaries defined, this stage measures each cell: its centroid coordinates, area, shape (eccentricity, solidity), and the mean intensity of every marker channel within its mask. The result is a single row per cell in a feature table.
 
@@ -55,7 +55,7 @@ Each stage in `pipeline.py` is a self-contained function that reads inputs from 
 | TIFF metadata + marker names | `io.py` | `load_slide_metadata()` |
 | Best-patch selection | `region_of_interest.py` | `choose_region_of_interest()` |
 | Autofluorescence subtraction | `preprocessing.py` | `preprocess_region_of_interest_patch()` |
-| Nuclear segmentation + cell expansion | `segmentation.py` | `segment_cells_from_marker_images()` |
+| Cellpose-SAM cell segmentation | `segmentation.py` | `segment_cells_from_marker_images()` |
 | Per-cell morphology & intensity | `quantification.py` | `quantify_cells_in_region_of_interest()` |
 | Marker thresholding & cell typing | `annotation.py` | `annotate_cells()` |
 | k-NN neighborhoods, domains, adjacency | `spatial_analysis.py` | `compute_spatial_analysis()` |
@@ -93,7 +93,7 @@ output_directory/<sample_identifier>/
 ├── histology_patch.tif
 ├── corrected_patch.tif
 ├── preprocessing_comparison.png
-├── segmentation_mask.tif
+├── segmentation_mask.npy
 ├── segmentation_overlay.tif
 ├── cell_features.csv
 ├── cell_annotations.csv
