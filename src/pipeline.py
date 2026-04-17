@@ -208,7 +208,6 @@ def run_quantify(
     marker_name_to_index = build_marker_name_to_index(marker_names)
 
     corrected_patch = tifffile.imread(output_directory / "corrected_patch.tif")
-    raw_patch = tifffile.imread(output_directory / "raw_patch.tif")
     label_image = np.load(output_directory / "segmentation_mask.npy")
 
     region_of_interest = RegionOfInterestBox(
@@ -218,22 +217,20 @@ def run_quantify(
         height_pixels=roi_metadata["height_pixels"],
     )
 
+    autofluorescence_marker = configuration.channels.autofluorescence_marker
+    biological_marker_names = [
+        name for name in marker_names if name != autofluorescence_marker
+    ]
     intensity_image_by_marker = {
-        marker_name: (
-            raw_patch[marker_index].astype(float)
-            if marker_name == configuration.channels.autofluorescence_marker
-            else corrected_patch[marker_index].astype(float)
-        )
-        for marker_name, marker_index in marker_name_to_index.items()
+        marker_name: corrected_patch[marker_name_to_index[marker_name]].astype(float)
+        for marker_name in biological_marker_names
     }
 
     cell_features = quantify_cells_in_region_of_interest(
         label_image,
         intensity_image_by_marker,
-        marker_names,
+        biological_marker_names,
         region_of_interest,
-        roi_metadata["pixel_size_x_micrometers"],
-        roi_metadata["pixel_size_y_micrometers"],
     )
 
     write_csv(

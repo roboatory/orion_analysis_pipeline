@@ -22,12 +22,9 @@ def test_quantification_schema_and_values() -> None:
         intensity_image_by_marker,
         ["Hoechst", "CD45"],
         RegionOfInterestBox(10, 20, 3, 3),
-        0.5,
-        0.5,
     )
     assert {
         "cell_identifier",
-        "label_identifier",
         "x_pixels",
         "y_pixels",
         "area_square_pixels",

@@ -62,8 +62,6 @@ def annotate_cells(
             "cell_identifier": thresholded_row["cell_identifier"],
             "x_pixels": thresholded_row["x_pixels"],
             "y_pixels": thresholded_row["y_pixels"],
-            "x_micrometers": thresholded_row["x_micrometers"],
-            "y_micrometers": thresholded_row["y_micrometers"],
             "cell_type": cell_type,
         }
         for marker_name in annotation_marker_names:
