@@ -223,6 +223,8 @@ def run_quantify(
         intensity_image_by_marker,
         biological_marker_names,
         region_of_interest,
+        roi_metadata["pixel_size_x_micrometers"],
+        roi_metadata["pixel_size_y_micrometers"],
     )
 
     write_csv(

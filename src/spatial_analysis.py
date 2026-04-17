@@ -28,8 +28,8 @@ def compute_spatial_analysis(
 
     point_coordinates = np.column_stack(
         [
-            cell_annotations["x_pixels"].to_numpy(),
-            cell_annotations["y_pixels"].to_numpy(),
+            cell_annotations["x_micrometers"].to_numpy(),
+            cell_annotations["y_micrometers"].to_numpy(),
         ]
     )
     adjacency_edges = build_symmetric_k_nearest_neighbor_graph(

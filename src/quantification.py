@@ -13,16 +13,18 @@ def quantify_cells_in_region_of_interest(
     intensity_image_by_marker: dict[str, np.ndarray],
     marker_names: list[str],
     region_of_interest: RegionOfInterestBox,
+    pixel_size_x_micrometers: float,
+    pixel_size_y_micrometers: float,
 ) -> pl.DataFrame:
     """Measure per-cell morphology and mean marker intensities from a segmentation mask."""
     region_properties = measure.regionprops(label_image)
     columns: dict[str, list[float | int]] = {
         "cell_identifier": [],
-        "x_pixels": [],
-        "y_pixels": [],
-        "area_square_pixels": [],
-        "major_axis_length_pixels": [],
-        "minor_axis_length_pixels": [],
+        "x_micrometers": [],
+        "y_micrometers": [],
+        "area_square_micrometers": [],
+        "major_axis_length_micrometers": [],
+        "minor_axis_length_micrometers": [],
         "eccentricity": [],
         "solidity": [],
         "extent": [],
@@ -52,18 +54,30 @@ def quantify_cells_in_region_of_interest(
         label_identifier = int(region_properties_entry.label)
         centroid_y_pixels, centroid_x_pixels = region_properties_entry.centroid
         columns["cell_identifier"].append(label_identifier)
-        columns["x_pixels"].append(
-            float(centroid_x_pixels + region_of_interest.x_pixels)
+        columns["x_micrometers"].append(
+            float(
+                (centroid_x_pixels + region_of_interest.x_pixels)
+                * pixel_size_x_micrometers
+            )
         )
-        columns["y_pixels"].append(
-            float(centroid_y_pixels + region_of_interest.y_pixels)
+        columns["y_micrometers"].append(
+            float(
+                (centroid_y_pixels + region_of_interest.y_pixels)
+                * pixel_size_y_micrometers
+            )
         )
-        columns["area_square_pixels"].append(float(region_properties_entry.area))
-        columns["major_axis_length_pixels"].append(
-            float(region_properties_entry.axis_major_length)
+        columns["area_square_micrometers"].append(
+            float(
+                region_properties_entry.area
+                * pixel_size_x_micrometers
+                * pixel_size_y_micrometers
+            )
         )
-        columns["minor_axis_length_pixels"].append(
-            float(region_properties_entry.axis_minor_length)
+        columns["major_axis_length_micrometers"].append(
+            float(region_properties_entry.axis_major_length * pixel_size_x_micrometers)
+        )
+        columns["minor_axis_length_micrometers"].append(
+            float(region_properties_entry.axis_minor_length * pixel_size_x_micrometers)
         )
         columns["eccentricity"].append(float(region_properties_entry.eccentricity))
         columns["solidity"].append(float(region_properties_entry.solidity))

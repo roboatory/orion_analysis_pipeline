@@ -22,14 +22,16 @@ def test_quantification_schema_and_values() -> None:
         intensity_image_by_marker,
         ["Hoechst", "CD45"],
         RegionOfInterestBox(10, 20, 3, 3),
+        0.5,
+        0.5,
     )
     assert {
         "cell_identifier",
-        "x_pixels",
-        "y_pixels",
-        "area_square_pixels",
+        "x_micrometers",
+        "y_micrometers",
+        "area_square_micrometers",
         "Hoechst",
         "CD45",
     } <= set(quantified_data_frame.columns)
     assert quantified_data_frame.height == 2
-    assert quantified_data_frame["area_square_pixels"].to_list() == [4.0, 2.0]
+    assert quantified_data_frame["area_square_micrometers"].to_list() == [1.0, 0.5]

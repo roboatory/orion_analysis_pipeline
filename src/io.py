@@ -249,8 +249,8 @@ def save_cell_assignment_map(
     color_index_by_label = {label: index for index, label in enumerate(unique_labels)}
     figure, axis = plt.subplots(figsize=(8, 6))
     axis.scatter(
-        cell_annotations["x_pixels"].to_numpy(),
-        cell_annotations["y_pixels"].to_numpy(),
+        cell_annotations["x_micrometers"].to_numpy(),
+        cell_annotations["y_micrometers"].to_numpy(),
         c=[color_index_by_label[label] for label in labels],
         cmap=color_map,
         s=6,
@@ -260,8 +260,8 @@ def save_cell_assignment_map(
         label_rows = cell_annotations.filter(pl.col(label_column_name) == label)
         if label_rows.is_empty():
             continue
-        x_position = float(np.median(label_rows["x_pixels"].to_numpy()))
-        y_position = float(np.median(label_rows["y_pixels"].to_numpy()))
+        x_position = float(np.median(label_rows["x_micrometers"].to_numpy()))
+        y_position = float(np.median(label_rows["y_micrometers"].to_numpy()))
         axis.text(
             x_position,
             y_position,
@@ -278,8 +278,8 @@ def save_cell_assignment_map(
             },
         )
     axis.set_title(title)
-    axis.set_xlabel("x (pixels)")
-    axis.set_ylabel("y (pixels)")
+    axis.set_xlabel("x (μm)")
+    axis.set_ylabel("y (μm)")
     axis.invert_yaxis()
     legend_handles = [
         Line2D(

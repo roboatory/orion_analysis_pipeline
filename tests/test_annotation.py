@@ -59,8 +59,8 @@ def build_configuration(
 def build_cell_features(**marker_values: float) -> pl.DataFrame:
     row = {
         "cell_identifier": 1,
-        "x_pixels": 1.0,
-        "y_pixels": 2.0,
+        "x_micrometers": 1.0,
+        "y_micrometers": 2.0,
         **marker_values,
     }
     return pl.DataFrame([row])
@@ -86,15 +86,15 @@ def test_multi_marker_rule_requires_all_positive_markers() -> None:
             [
                 {
                     "cell_identifier": 1,
-                    "x_pixels": 1.0,
-                    "y_pixels": 2.0,
+                    "x_micrometers": 1.0,
+                    "y_micrometers": 2.0,
                     "CD4": 1000.0,
                     "FOXP3": 0.0,
                 },
                 {
                     "cell_identifier": 2,
-                    "x_pixels": 3.0,
-                    "y_pixels": 4.0,
+                    "x_micrometers": 3.0,
+                    "y_micrometers": 4.0,
                     "CD4": 1000.0,
                     "FOXP3": 1000.0,
                 },

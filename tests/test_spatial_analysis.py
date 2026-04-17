@@ -30,8 +30,8 @@ def test_spatial_analysis_output_is_reproducible() -> None:
     cell_annotations = pl.DataFrame(
         {
             "cell_identifier": [1, 2, 3, 4],
-            "x_pixels": [0.0, 1.0, 10.0, 11.0],
-            "y_pixels": [0.0, 0.0, 0.0, 0.0],
+            "x_micrometers": [0.0, 1.0, 10.0, 11.0],
+            "y_micrometers": [0.0, 0.0, 0.0, 0.0],
             "cell_type": ["A", "A", "B", "B"],
         }
     )
@@ -55,8 +55,8 @@ def test_spatial_domains_are_added_to_annotations() -> None:
     cell_annotations = pl.DataFrame(
         {
             "cell_identifier": [1, 2, 3, 4],
-            "x_pixels": [0.0, 2.0, 20.0, 22.0],
-            "y_pixels": [0.0, 0.0, 0.0, 0.0],
+            "x_micrometers": [0.0, 2.0, 20.0, 22.0],
+            "y_micrometers": [0.0, 0.0, 0.0, 0.0],
             "cell_type": ["A", "A", "B", "B"],
         }
     )
