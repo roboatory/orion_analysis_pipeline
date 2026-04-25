@@ -25,9 +25,20 @@ class RegionOfInterestConfiguration(BaseModel):
     patch_width_pixels: int
     patch_height_pixels: int
     candidate_patch_count: int = Field(default=12, ge=1)
+    analysis_patch_count: int = Field(default=1, ge=1)
     minimum_tissue_fraction: float = Field(default=0.35, ge=0.0, le=1.0)
     minimum_informative_channel_fraction: float = Field(default=0.5, ge=0.0, le=1.0)
     minimum_channel_signal_spread: float = Field(default=0.05, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def validate_analysis_patch_count(self) -> "RegionOfInterestConfiguration":
+        """Ensure the number of patches to analyze does not exceed the candidate pool."""
+        if self.analysis_patch_count > self.candidate_patch_count:
+            raise ValueError(
+                "region_of_interest.analysis_patch_count must not exceed "
+                "region_of_interest.candidate_patch_count."
+            )
+        return self
 
 
 class AutofluorescenceSubtractionConfiguration(BaseModel):

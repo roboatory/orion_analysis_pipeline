@@ -14,7 +14,7 @@ from matplotlib.colors import ListedColormap
 from matplotlib.lines import Line2D
 from skimage import color
 
-from src.data_models import RegionOfInterestBox, SlideMetadata
+from src.data_models import PatchEntry, RegionOfInterestBox, SlideMetadata
 
 if TYPE_CHECKING:
     from src.configuration import ApplicationConfiguration
@@ -26,6 +26,72 @@ def ensure_directory(path: Path) -> Path:
     """Create the directory and any missing parents, returning the path."""
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def format_patch_identifier(patch_index: int) -> str:
+    """Return the zero-padded patch identifier used for per-patch output directories."""
+    return f"patch_{patch_index:03d}"
+
+
+def patch_output_directory(
+    sample_output_directory: Path,
+    patch_id: str,
+) -> Path:
+    """Return the per-patch output subdirectory path under a sample output directory."""
+    return sample_output_directory / patch_id
+
+
+def write_patches_manifest(
+    path: Path,
+    sample_identifier: str,
+    slide_metadata: SlideMetadata,
+    patch_entries: list[PatchEntry],
+) -> Path:
+    """Write the top-level patches manifest describing the selected patches."""
+    payload: dict[str, Any] = {
+        "sample_identifier": sample_identifier,
+        "pixel_size_x_micrometers": slide_metadata.pixel_size_x_micrometers,
+        "pixel_size_y_micrometers": slide_metadata.pixel_size_y_micrometers,
+        "marker_names": slide_metadata.marker_names,
+        "patches": [
+            {
+                "patch_id": entry.patch_id,
+                "x_pixels": entry.region_of_interest.x_pixels,
+                "y_pixels": entry.region_of_interest.y_pixels,
+                "width_pixels": entry.region_of_interest.width_pixels,
+                "height_pixels": entry.region_of_interest.height_pixels,
+            }
+            for entry in patch_entries
+        ],
+    }
+    write_yaml_file(path, payload)
+    return path
+
+
+def read_patches_manifest(path: Path) -> dict[str, Any]:
+    """Read the top-level patches manifest back into a dictionary."""
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Patches manifest not found at {path}. Run the select-roi stage first."
+        )
+    with path.open("r", encoding="utf-8") as file_handle:
+        return yaml.safe_load(file_handle)
+
+
+def parse_patch_entries(manifest_payload: dict[str, Any]) -> list[PatchEntry]:
+    """Build PatchEntry values from a parsed manifest dictionary."""
+    return [
+        PatchEntry(
+            patch_id=entry["patch_id"],
+            region_of_interest=RegionOfInterestBox(
+                x_pixels=int(entry["x_pixels"]),
+                y_pixels=int(entry["y_pixels"]),
+                width_pixels=int(entry["width_pixels"]),
+                height_pixels=int(entry["height_pixels"]),
+            ),
+        )
+        for entry in manifest_payload["patches"]
+    ]
 
 
 def read_marker_names(path: Path) -> list[str]:

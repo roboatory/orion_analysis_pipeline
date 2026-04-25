@@ -20,8 +20,8 @@ from src.io import (
 def choose_region_of_interest(
     configuration: ApplicationConfiguration,
     slide_metadata: SlideMetadata,
-) -> tuple[RegionOfInterestBox, pl.DataFrame]:
-    """Select the highest-quality candidate patch from the slide as the analysis ROI."""
+) -> tuple[list[RegionOfInterestBox], pl.DataFrame]:
+    """Select the top non-overlapping analysis patches from the scored candidate pool."""
     validate_region_of_interest_bounds(
         configuration,
         slide_metadata,
@@ -41,15 +41,34 @@ def choose_region_of_interest(
         )
         for region_of_interest in candidate_regions_of_interest
     ]
-    candidate_data_frame = build_candidate_data_frame(candidate_rows)
-    selected_row = candidate_data_frame.row(0, named=True)
-    selected_region_of_interest = RegionOfInterestBox(
-        x_pixels=int(selected_row["x_pixels"]),
-        y_pixels=int(selected_row["y_pixels"]),
-        width_pixels=int(selected_row["width_pixels"]),
-        height_pixels=int(selected_row["height_pixels"]),
+    sorted_candidate_data_frame = sort_candidate_data_frame(candidate_rows)
+    selected_row_indices = select_non_overlapping_top_rows(
+        sorted_candidate_data_frame,
+        configuration.region_of_interest.analysis_patch_count,
     )
-    return selected_region_of_interest, candidate_data_frame
+    candidate_data_frame = mark_selected_rows(
+        sorted_candidate_data_frame,
+        selected_row_indices,
+    )
+    selected_regions_of_interest = [
+        build_region_of_interest_box_from_row(
+            candidate_data_frame.row(row_index, named=True)
+        )
+        for row_index in selected_row_indices
+    ]
+    return selected_regions_of_interest, candidate_data_frame
+
+
+def build_region_of_interest_box_from_row(
+    row: dict[str, object],
+) -> RegionOfInterestBox:
+    """Build a RegionOfInterestBox from a candidate dataframe row."""
+    return RegionOfInterestBox(
+        x_pixels=int(row["x_pixels"]),
+        y_pixels=int(row["y_pixels"]),
+        width_pixels=int(row["width_pixels"]),
+        height_pixels=int(row["height_pixels"]),
+    )
 
 
 def build_candidate_row(
@@ -94,20 +113,77 @@ def passes_quality_thresholds(
     )
 
 
-def build_candidate_data_frame(
+def sort_candidate_data_frame(
     candidate_rows: list[dict[str, object]],
 ) -> pl.DataFrame:
-    """Sort candidates by quality and mark the top one as selected."""
-    candidate_data_frame = pl.DataFrame(candidate_rows).sort(
+    """Sort candidate rows by pass/quality order without marking selections."""
+    return pl.DataFrame(candidate_rows).sort(
         ["passes_quality_thresholds", "quality_score"],
         descending=[True, True],
     )
-    return candidate_data_frame.with_columns(
+
+
+def select_non_overlapping_top_rows(
+    sorted_candidate_data_frame: pl.DataFrame,
+    analysis_patch_count: int,
+) -> list[int]:
+    """Greedily pick the top N candidate row indices whose bounding boxes do not overlap."""
+    selected_row_indices: list[int] = []
+    selected_boxes: list[RegionOfInterestBox] = []
+    for row_index in range(sorted_candidate_data_frame.height):
+        if len(selected_row_indices) == analysis_patch_count:
+            break
+        candidate_box = build_region_of_interest_box_from_row(
+            sorted_candidate_data_frame.row(row_index, named=True)
+        )
+        if any(
+            boxes_overlap(candidate_box, selected_box)
+            for selected_box in selected_boxes
+        ):
+            continue
+        selected_row_indices.append(row_index)
+        selected_boxes.append(candidate_box)
+    if len(selected_row_indices) < analysis_patch_count:
+        raise ValueError(
+            "Unable to select "
+            f"{analysis_patch_count} non-overlapping patches from the candidate pool. "
+            "Increase region_of_interest.candidate_patch_count or decrease "
+            "region_of_interest.analysis_patch_count."
+        )
+    return selected_row_indices
+
+
+def mark_selected_rows(
+    sorted_candidate_data_frame: pl.DataFrame,
+    selected_row_indices: list[int],
+) -> pl.DataFrame:
+    """Return a new dataframe with a boolean 'selected' column flagging the given rows."""
+    selected_index_set = set(selected_row_indices)
+    return sorted_candidate_data_frame.with_columns(
         pl.Series(
             "selected",
-            [row_index == 0 for row_index in range(candidate_data_frame.height)],
+            [
+                row_index in selected_index_set
+                for row_index in range(sorted_candidate_data_frame.height)
+            ],
         )
     )
+
+
+def boxes_overlap(
+    first_box: RegionOfInterestBox,
+    second_box: RegionOfInterestBox,
+) -> bool:
+    """Return True if two bounding boxes share any pixel (half-open intervals)."""
+    horizontal_overlap = (
+        first_box.x_pixels < second_box.x_end_pixels
+        and second_box.x_pixels < first_box.x_end_pixels
+    )
+    vertical_overlap = (
+        first_box.y_pixels < second_box.y_end_pixels
+        and second_box.y_pixels < first_box.y_end_pixels
+    )
+    return horizontal_overlap and vertical_overlap
 
 
 def validate_region_of_interest_bounds(

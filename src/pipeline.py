@@ -8,17 +8,20 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 import tifffile
-import yaml
 
 from src.annotation import annotate_cells
 from src.configuration import ApplicationConfiguration
 from src.constants import STAGES
-from src.data_models import RegionOfInterestBox
+from src.data_models import PatchEntry, SlideMetadata
 from src.io import (
     build_marker_name_to_index,
     ensure_directory,
+    format_patch_identifier,
     load_slide_metadata,
+    parse_patch_entries,
+    patch_output_directory,
     read_histology_region_of_interest,
+    read_patches_manifest,
     read_readouts_region_of_interest,
     save_cell_assignment_map,
     save_preprocessing_comparison,
@@ -26,12 +29,16 @@ from src.io import (
     write_csv,
     write_image_stack,
     write_label_array,
+    write_patches_manifest,
     write_yaml_file,
 )
 from src.preprocessing import preprocess_region_of_interest_patch
 from src.quantification import quantify_cells_in_region_of_interest
 from src.region_of_interest import choose_region_of_interest
-from src.segmentation import segment_cells_from_marker_images
+from src.segmentation import (
+    build_segmentation_model,
+    segment_cells_from_marker_images,
+)
 from src.spatial_analysis import compute_spatial_analysis
 
 
@@ -59,8 +66,8 @@ def run_select_roi(
     configuration: ApplicationConfiguration,
     logger: logging.Logger,
 ) -> None:
-    """Select the best patch from the slide and write the raw patch and ROI metadata."""
-    output_directory = ensure_directory(configuration.sample_output_directory)
+    """Select non-overlapping analysis patches and write the manifest and per-patch ROI files."""
+    sample_output_directory = ensure_directory(configuration.sample_output_directory)
     slide_metadata = load_slide_metadata(configuration)
 
     logger.info("mode: %s", "patch")
@@ -71,245 +78,330 @@ def run_select_roi(
     logger.info("image_height_pixels: %s", slide_metadata.height_pixels)
     logger.info("pixel_size_x_micrometers: %s", slide_metadata.pixel_size_x_micrometers)
     logger.info("pixel_size_y_micrometers: %s", slide_metadata.pixel_size_y_micrometers)
+    logger.info(
+        "analysis_patch_count: %s",
+        configuration.region_of_interest.analysis_patch_count,
+    )
 
-    selected_roi, candidate_data_frame = choose_region_of_interest(
+    selected_regions_of_interest, candidate_data_frame = choose_region_of_interest(
         configuration, slide_metadata
     )
-    selected_candidate = candidate_data_frame.filter(pl.col("selected")).to_dicts()
-    if selected_candidate:
-        logger.info("region_of_interest_quality: %s", selected_candidate[0])
 
-    raw_patch = read_readouts_region_of_interest(
-        configuration.input_paths.readouts, selected_roi
-    )
-    write_image_stack(
-        output_directory / "raw_patch.tif",
-        raw_patch,
-        slide_metadata.marker_names,
+    write_csv(
+        candidate_data_frame,
+        sample_output_directory / "candidate_patches.csv",
     )
 
-    if configuration.input_paths.histology:
-        histology_patch = read_histology_region_of_interest(
-            configuration.input_paths.histology, selected_roi
+    patch_entries = [
+        PatchEntry(
+            patch_id=format_patch_identifier(patch_index),
+            region_of_interest=region_of_interest,
         )
-        tifffile.imwrite(
-            output_directory / "histology_patch.tif",
-            histology_patch,
-        )
+        for patch_index, region_of_interest in enumerate(selected_regions_of_interest)
+    ]
 
-    write_yaml_file(
-        output_directory / "roi_metadata.yaml",
-        {
-            **asdict(selected_roi),
-            "pixel_size_x_micrometers": slide_metadata.pixel_size_x_micrometers,
-            "pixel_size_y_micrometers": slide_metadata.pixel_size_y_micrometers,
-            "marker_names": slide_metadata.marker_names,
-        },
+    write_patches_manifest(
+        sample_output_directory / "patches_manifest.yaml",
+        configuration.sample_identifier,
+        slide_metadata,
+        patch_entries,
     )
 
-    logger.info("selected_region_of_interest: %s", asdict(selected_roi))
+    for patch_entry in patch_entries:
+        _write_patch_inputs(
+            configuration,
+            slide_metadata,
+            patch_entry,
+            sample_output_directory,
+            logger,
+        )
 
 
 def run_preprocess(
     configuration: ApplicationConfiguration,
     logger: logging.Logger,
 ) -> None:
-    """Subtract autofluorescence from the raw patch and save the corrected stack."""
-    output_directory = configuration.sample_output_directory
-    roi_metadata = _load_roi_metadata(output_directory)
-    marker_names = roi_metadata["marker_names"]
+    """Subtract autofluorescence from every patch and save the corrected stacks."""
+    manifest_payload, patch_entries = _load_manifest_entries(configuration)
+    marker_names = manifest_payload["marker_names"]
 
-    raw_patch = tifffile.imread(output_directory / "raw_patch.tif")
+    for patch_entry in patch_entries:
+        patch_directory = patch_output_directory(
+            configuration.sample_output_directory, patch_entry.patch_id
+        )
+        raw_patch = tifffile.imread(patch_directory / "raw_patch.tif")
+        patch_seed = derive_patch_seed(
+            configuration.sample_identifier,
+            _patch_index_from_id(patch_entry.patch_id),
+        )
+        preprocessing_result = preprocess_region_of_interest_patch(
+            raw_patch,
+            marker_names,
+            configuration,
+            patch_seed,
+        )
 
-    random_seed = zlib.crc32(configuration.sample_identifier.encode("utf-8"))
-    preprocessing_result = preprocess_region_of_interest_patch(
-        raw_patch,
-        marker_names,
-        configuration,
-        random_seed,
-    )
+        write_image_stack(
+            patch_directory / "corrected_patch.tif",
+            preprocessing_result.corrected_image_stack,
+            marker_names,
+        )
 
-    write_image_stack(
-        output_directory / "corrected_patch.tif",
-        preprocessing_result.corrected_image_stack,
-        marker_names,
-    )
+        marker_name_to_index = build_marker_name_to_index(marker_names)
+        comparison_index = marker_name_to_index[
+            configuration.channels.cytoplasmic_marker
+        ]
+        save_preprocessing_comparison(
+            raw_patch[comparison_index],
+            preprocessing_result.corrected_image_stack[comparison_index],
+            configuration.channels.cytoplasmic_marker,
+            patch_directory / "preprocessing_comparison.png",
+        )
 
-    marker_name_to_index = build_marker_name_to_index(marker_names)
-    comparison_index = marker_name_to_index[configuration.channels.cytoplasmic_marker]
-    save_preprocessing_comparison(
-        raw_patch[comparison_index],
-        preprocessing_result.corrected_image_stack[comparison_index],
-        configuration.channels.cytoplasmic_marker,
-        output_directory / "preprocessing_comparison.png",
-    )
-
-    logger.info("preprocessing complete")
+        logger.info("preprocessing complete: %s", patch_entry.patch_id)
 
 
 def run_segment(
     configuration: ApplicationConfiguration,
     logger: logging.Logger,
 ) -> None:
-    """Segment cells from the corrected patch and write the label mask and overlay."""
-    output_directory = configuration.sample_output_directory
-    roi_metadata = _load_roi_metadata(output_directory)
-    marker_name_to_index = build_marker_name_to_index(roi_metadata["marker_names"])
+    """Segment cells for every patch, building the Cellpose model once and reusing it."""
+    manifest_payload, patch_entries = _load_manifest_entries(configuration)
+    marker_name_to_index = build_marker_name_to_index(manifest_payload["marker_names"])
+    segmentation_model = build_segmentation_model(configuration)
 
-    corrected_patch = tifffile.imread(output_directory / "corrected_patch.tif")
-    nuclear_index = marker_name_to_index[configuration.channels.nuclear_marker]
-    cytoplasmic_index = marker_name_to_index[configuration.channels.cytoplasmic_marker]
+    for patch_entry in patch_entries:
+        patch_directory = patch_output_directory(
+            configuration.sample_output_directory, patch_entry.patch_id
+        )
+        corrected_patch = tifffile.imread(patch_directory / "corrected_patch.tif")
+        nuclear_index = marker_name_to_index[configuration.channels.nuclear_marker]
+        cytoplasmic_index = marker_name_to_index[
+            configuration.channels.cytoplasmic_marker
+        ]
 
-    segmentation_result = segment_cells_from_marker_images(
-        corrected_patch[nuclear_index],
-        corrected_patch[cytoplasmic_index],
-        configuration,
-    )
+        segmentation_result = segment_cells_from_marker_images(
+            corrected_patch[nuclear_index],
+            corrected_patch[cytoplasmic_index],
+            configuration,
+            segmentation_model,
+        )
 
-    write_label_array(
-        output_directory / "segmentation_mask.npy",
-        segmentation_result.cell_labels,
-    )
+        write_label_array(
+            patch_directory / "segmentation_mask.npy",
+            segmentation_result.cell_labels,
+        )
 
-    histology_path = output_directory / "histology_patch.tif"
-    background_image = (
-        tifffile.imread(histology_path)
-        if histology_path.exists()
-        else corrected_patch[cytoplasmic_index]
-    )
-    save_segmentation_overlay_image(
-        background_image,
-        segmentation_result.cell_labels,
-        output_directory / "segmentation_overlay.tif",
-    )
+        histology_path = patch_directory / "histology_patch.tif"
+        background_image = (
+            tifffile.imread(histology_path)
+            if histology_path.exists()
+            else corrected_patch[cytoplasmic_index]
+        )
+        save_segmentation_overlay_image(
+            background_image,
+            segmentation_result.cell_labels,
+            patch_directory / "segmentation_overlay.tif",
+        )
 
-    logger.info(
-        "segmentation complete: %d cells",
-        int(segmentation_result.cell_labels.max()),
-    )
+        logger.info(
+            "segmentation complete: %s, %d cells",
+            patch_entry.patch_id,
+            int(segmentation_result.cell_labels.max()),
+        )
 
 
 def run_quantify(
     configuration: ApplicationConfiguration,
     logger: logging.Logger,
 ) -> None:
-    """Measure per-cell morphology and marker intensities and write cell_features.csv."""
-    output_directory = configuration.sample_output_directory
-    roi_metadata = _load_roi_metadata(output_directory)
-    marker_names = roi_metadata["marker_names"]
+    """Measure per-cell features and write cell_features.csv for every patch."""
+    manifest_payload, patch_entries = _load_manifest_entries(configuration)
+    marker_names = manifest_payload["marker_names"]
     marker_name_to_index = build_marker_name_to_index(marker_names)
-
-    corrected_patch = tifffile.imread(output_directory / "corrected_patch.tif")
-    label_image = np.load(output_directory / "segmentation_mask.npy")
-
-    region_of_interest = RegionOfInterestBox(
-        x_pixels=roi_metadata["x_pixels"],
-        y_pixels=roi_metadata["y_pixels"],
-        width_pixels=roi_metadata["width_pixels"],
-        height_pixels=roi_metadata["height_pixels"],
-    )
-
     autofluorescence_marker = configuration.channels.autofluorescence_marker
     biological_marker_names = [
         name for name in marker_names if name != autofluorescence_marker
     ]
-    intensity_image_by_marker = {
-        marker_name: corrected_patch[marker_name_to_index[marker_name]].astype(float)
-        for marker_name in biological_marker_names
-    }
+    pixel_size_x_micrometers = float(manifest_payload["pixel_size_x_micrometers"])
+    pixel_size_y_micrometers = float(manifest_payload["pixel_size_y_micrometers"])
 
-    cell_features = quantify_cells_in_region_of_interest(
-        label_image,
-        intensity_image_by_marker,
-        biological_marker_names,
-        region_of_interest,
-        roi_metadata["pixel_size_x_micrometers"],
-        roi_metadata["pixel_size_y_micrometers"],
-    )
+    for patch_entry in patch_entries:
+        patch_directory = patch_output_directory(
+            configuration.sample_output_directory, patch_entry.patch_id
+        )
+        corrected_patch = tifffile.imread(patch_directory / "corrected_patch.tif")
+        label_image = np.load(patch_directory / "segmentation_mask.npy")
 
-    write_csv(
-        cell_features,
-        output_directory / "cell_features.csv",
-    )
+        intensity_image_by_marker = {
+            marker_name: corrected_patch[marker_name_to_index[marker_name]].astype(
+                float
+            )
+            for marker_name in biological_marker_names
+        }
 
-    logger.info("quantification complete: %d cells", cell_features.height)
+        cell_features = quantify_cells_in_region_of_interest(
+            label_image,
+            intensity_image_by_marker,
+            biological_marker_names,
+            patch_entry.region_of_interest,
+            pixel_size_x_micrometers,
+            pixel_size_y_micrometers,
+        )
+
+        write_csv(
+            cell_features,
+            patch_directory / "cell_features.csv",
+        )
+
+        logger.info(
+            "quantification complete: %s, %d cells",
+            patch_entry.patch_id,
+            cell_features.height,
+        )
 
 
 def run_annotate(
     configuration: ApplicationConfiguration,
     logger: logging.Logger,
 ) -> None:
-    """Assign cell type labels from quantified features and save annotations and map."""
-    output_directory = configuration.sample_output_directory
-    cell_features = pl.read_csv(output_directory / "cell_features.csv")
+    """Assign cell type labels for every patch and save annotations and maps."""
+    _, patch_entries = _load_manifest_entries(configuration)
 
-    cell_annotations = annotate_cells(
-        cell_features,
-        configuration,
-    )
+    for patch_entry in patch_entries:
+        patch_directory = patch_output_directory(
+            configuration.sample_output_directory, patch_entry.patch_id
+        )
+        cell_features = pl.read_csv(patch_directory / "cell_features.csv")
 
-    write_csv(
-        cell_annotations,
-        output_directory / "cell_annotations.csv",
-    )
+        cell_annotations = annotate_cells(
+            cell_features,
+            configuration,
+        )
 
-    save_cell_assignment_map(
-        cell_annotations,
-        "cell_type",
-        "Cell type map",
-        output_directory / "cell_type_map.png",
-    )
+        write_csv(
+            cell_annotations,
+            patch_directory / "cell_annotations.csv",
+        )
 
-    logger.info("annotation complete")
+        save_cell_assignment_map(
+            cell_annotations,
+            "cell_type",
+            "Cell type map",
+            patch_directory / "cell_type_map.png",
+        )
+
+        logger.info("annotation complete: %s", patch_entry.patch_id)
 
 
 def run_spatial(
     configuration: ApplicationConfiguration,
     logger: logging.Logger,
 ) -> None:
-    """Compute spatial neighborhoods, domains, and adjacency enrichment metrics."""
-    output_directory = configuration.sample_output_directory
-    cell_annotations = pl.read_csv(output_directory / "cell_annotations.csv")
+    """Compute spatial neighborhoods, domains, and adjacency metrics for every patch."""
+    _, patch_entries = _load_manifest_entries(configuration)
 
-    if "spatial_domain" in cell_annotations.columns:
-        cell_annotations = cell_annotations.drop("spatial_domain")
-
-    random_seed = zlib.crc32(configuration.sample_identifier.encode("utf-8"))
-    spatial_analysis_result = compute_spatial_analysis(
-        cell_annotations,
-        configuration,
-        random_seed,
-    )
-
-    write_csv(
-        spatial_analysis_result.cell_annotations_with_domains,
-        output_directory / "cell_annotations.csv",
-    )
-    write_csv(
-        spatial_analysis_result.spatial_metrics,
-        output_directory / "spatial_metrics.csv",
-    )
-
-    save_cell_assignment_map(
-        spatial_analysis_result.cell_annotations_with_domains,
-        "spatial_domain",
-        "Spatial domain map",
-        output_directory / "spatial_domain_map.png",
-    )
-
-    logger.info("spatial analysis complete")
-
-
-def _load_roi_metadata(output_directory: Path) -> dict:
-    """Load ROI metadata from the YAML file written by the select-roi stage."""
-    metadata_path = output_directory / "roi_metadata.yaml"
-    if not metadata_path.exists():
-        raise FileNotFoundError(
-            f"ROI metadata not found at {metadata_path}. "
-            "Run the select-roi stage first."
+    for patch_entry in patch_entries:
+        patch_directory = patch_output_directory(
+            configuration.sample_output_directory, patch_entry.patch_id
         )
-    with metadata_path.open("r", encoding="utf-8") as file_handle:
-        return yaml.safe_load(file_handle)
+        cell_annotations = pl.read_csv(patch_directory / "cell_annotations.csv")
+
+        if "spatial_domain" in cell_annotations.columns:
+            cell_annotations = cell_annotations.drop("spatial_domain")
+
+        patch_seed = derive_patch_seed(
+            configuration.sample_identifier,
+            _patch_index_from_id(patch_entry.patch_id),
+        )
+        spatial_analysis_result = compute_spatial_analysis(
+            cell_annotations,
+            configuration,
+            patch_seed,
+        )
+
+        write_csv(
+            spatial_analysis_result.cell_annotations_with_domains,
+            patch_directory / "cell_annotations.csv",
+        )
+        write_csv(
+            spatial_analysis_result.spatial_metrics,
+            patch_directory / "spatial_metrics.csv",
+        )
+
+        save_cell_assignment_map(
+            spatial_analysis_result.cell_annotations_with_domains,
+            "spatial_domain",
+            "Spatial domain map",
+            patch_directory / "spatial_domain_map.png",
+        )
+
+        logger.info("spatial analysis complete: %s", patch_entry.patch_id)
+
+
+def derive_patch_seed(sample_identifier: str, patch_index: int) -> int:
+    """Derive a deterministic RNG seed unique to a (sample_identifier, patch_index) pair."""
+    return zlib.crc32(f"{sample_identifier}:patch_{patch_index:03d}".encode("utf-8"))
+
+
+def _write_patch_inputs(
+    configuration: ApplicationConfiguration,
+    slide_metadata: SlideMetadata,
+    patch_entry: PatchEntry,
+    sample_output_directory: Path,
+    logger: logging.Logger,
+) -> None:
+    """Write per-patch raw inputs (raw_patch.tif, optional histology, roi_metadata.yaml)."""
+    patch_directory = ensure_directory(
+        patch_output_directory(sample_output_directory, patch_entry.patch_id)
+    )
+
+    raw_patch = read_readouts_region_of_interest(
+        configuration.input_paths.readouts, patch_entry.region_of_interest
+    )
+    write_image_stack(
+        patch_directory / "raw_patch.tif",
+        raw_patch,
+        slide_metadata.marker_names,
+    )
+
+    if configuration.input_paths.histology:
+        histology_patch = read_histology_region_of_interest(
+            configuration.input_paths.histology, patch_entry.region_of_interest
+        )
+        tifffile.imwrite(
+            patch_directory / "histology_patch.tif",
+            histology_patch,
+        )
+
+    write_yaml_file(
+        patch_directory / "roi_metadata.yaml",
+        {
+            "patch_id": patch_entry.patch_id,
+            **asdict(patch_entry.region_of_interest),
+        },
+    )
+
+    logger.info(
+        "selected_region_of_interest: %s %s",
+        patch_entry.patch_id,
+        asdict(patch_entry.region_of_interest),
+    )
+
+
+def _load_manifest_entries(
+    configuration: ApplicationConfiguration,
+) -> tuple[dict, list[PatchEntry]]:
+    """Load the patches manifest and return both the raw payload and parsed patch entries."""
+    manifest_path = configuration.sample_output_directory / "patches_manifest.yaml"
+    manifest_payload = read_patches_manifest(manifest_path)
+    patch_entries = parse_patch_entries(manifest_payload)
+    return manifest_payload, patch_entries
+
+
+def _patch_index_from_id(patch_id: str) -> int:
+    """Parse the integer index out of a patch identifier like 'patch_003'."""
+    return int(patch_id.rsplit("_", 1)[-1])
 
 
 _STAGE_FUNCTIONS = {

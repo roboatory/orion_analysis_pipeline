@@ -14,6 +14,7 @@ region_of_interest:
   patch_width_pixels: 2048
   patch_height_pixels: 2048
   candidate_patch_count: 12
+  analysis_patch_count: 3
   minimum_tissue_fraction: 0.35
   minimum_informative_channel_fraction: 0.5
   minimum_channel_signal_spread: 0.05
