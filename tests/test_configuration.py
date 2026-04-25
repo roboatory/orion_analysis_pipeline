@@ -142,3 +142,29 @@ def test_cytoplasmic_marker_must_differ_from_nuclear_marker(tmp_path: Path) -> N
     configuration_path = write_configuration_file(tmp_path, configuration_dictionary)
     with pytest.raises(ValueError):
         load_configuration(configuration_path)
+
+
+def test_analysis_patch_count_defaults_to_one(tmp_path: Path) -> None:
+    configuration_dictionary = base_configuration_dictionary(tmp_path)
+    configuration_path = write_configuration_file(tmp_path, configuration_dictionary)
+    configuration = load_configuration(configuration_path)
+    assert configuration.region_of_interest.analysis_patch_count == 1
+
+
+def test_analysis_patch_count_rejects_values_below_one(tmp_path: Path) -> None:
+    configuration_dictionary = base_configuration_dictionary(tmp_path)
+    configuration_dictionary["region_of_interest"]["analysis_patch_count"] = 0
+    configuration_path = write_configuration_file(tmp_path, configuration_dictionary)
+    with pytest.raises(ValueError):
+        load_configuration(configuration_path)
+
+
+def test_analysis_patch_count_cannot_exceed_candidate_patch_count(
+    tmp_path: Path,
+) -> None:
+    configuration_dictionary = base_configuration_dictionary(tmp_path)
+    configuration_dictionary["region_of_interest"]["candidate_patch_count"] = 3
+    configuration_dictionary["region_of_interest"]["analysis_patch_count"] = 5
+    configuration_path = write_configuration_file(tmp_path, configuration_dictionary)
+    with pytest.raises(ValueError):
+        load_configuration(configuration_path)

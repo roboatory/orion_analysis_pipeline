@@ -14,16 +14,23 @@ class SegmentationResult:
     cell_labels: np.ndarray
 
 
+def build_segmentation_model(
+    configuration: ApplicationConfiguration,
+) -> CellposeModel:
+    """Construct a Cellpose-SAM model once so it can be reused across patches."""
+    return CellposeModel(
+        pretrained_model="cpsam",
+        gpu=configuration.segmentation.use_gpu,
+    )
+
+
 def segment_cells_from_marker_images(
     nuclear_image: np.ndarray,
     cytoplasmic_image: np.ndarray,
     configuration: ApplicationConfiguration,
+    model: CellposeModel,
 ) -> SegmentationResult:
     """Segment cells using Cellpose-SAM with nuclear and cytoplasmic channels."""
-    model = CellposeModel(
-        pretrained_model="cpsam",
-        gpu=configuration.segmentation.use_gpu,
-    )
     image_stack = np.stack(
         [cytoplasmic_image, nuclear_image],
         axis=-1,

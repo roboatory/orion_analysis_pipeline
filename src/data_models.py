@@ -31,3 +31,9 @@ class SlideMetadata:
     pixel_size_x_micrometers: float
     pixel_size_y_micrometers: float
     marker_names: list[str]
+
+
+@dataclass(frozen=True)
+class PatchEntry:
+    patch_id: str
+    region_of_interest: RegionOfInterestBox
